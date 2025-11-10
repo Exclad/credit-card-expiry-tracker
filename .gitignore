@@ -1,0 +1,9 @@
+# Personal data file - DO NOT COMMIT
+my_cards.csv
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Streamlit config (good practice)
+.streamlit/
