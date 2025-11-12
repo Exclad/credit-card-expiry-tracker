@@ -54,12 +54,10 @@ if 'show_edit_form' not in st.session_state:
     st.session_state.show_edit_form = False
 if 'card_to_edit' not in st.session_state:
     st.session_state.card_to_edit = None
-# --- MODIFIED: Added new states for the add form ---
 if 'add_method' not in st.session_state:
     st.session_state.add_method = "Choose from list"
 if 'card_to_add_selection' not in st.session_state:
     st.session_state.card_to_add_selection = None
-# --- End of modification ---
 
 
 # --- Helper Functions ---
@@ -72,6 +70,15 @@ def load_data():
         df = df.astype(COLUMN_DTYPES)
         return df
 
+# --- MODIFIED: Added prettify_bank_name helper ---
+def prettify_bank_name(bank_name):
+    """Converts file-safe bank names to display-friendly names."""
+    if bank_name == "StandardChartered":
+        return "Standard Chartered"
+    if bank_name == "AmericanExpress":
+        return "American Express"
+    return bank_name
+
 def get_card_mapping():
     """Scans the IMAGE_DIR and creates a mapping."""
     card_mapping = {}
@@ -81,28 +88,28 @@ def get_card_mapping():
                 base_name = os.path.splitext(filename)[0]
                 parts = base_name.split("_")
                 if len(parts) >= 2:
-                    bank = parts[0]
+                    bank_raw = parts[0]
+                    # --- MODIFIED: Use the helper function ---
+                    bank = prettify_bank_name(bank_raw)
                     card_name = " ".join(parts[1:])
                     display_name = f"{bank} {card_name}"
                     card_mapping[display_name] = filename
     except FileNotFoundError:
         st.error(f"Image directory '{IMAGE_DIR}' not found. Please create it.")
     return card_mapping
+# --- End of modification ---
 
 # =============================================================================
 # 1. "Add New Card" Page (Main Area)
 # =============================================================================
-# --- MODIFIED: This function is heavily restructured ---
 def show_add_card_form(card_mapping):
     st.title("Add a New Card", anchor=False)
     
-    # --- WIDGETS MOVED OUTSIDE THE FORM ---
-    # These widgets now update live
     st.radio(
         "How would you like to add a card?",
         ("Choose from list", "Add a custom card"),
         horizontal=True,
-        key="add_method" # Link to session state
+        key="add_method"
     )
 
     bank, card_name, image_filename = None, None, None
@@ -112,29 +119,26 @@ def show_add_card_form(card_mapping):
             st.error("No pre-listed card images found in 'card_images' folder.")
             st.session_state.card_to_add_selection = None
         else:
-            # Set default if state is empty
-            if st.session_state.card_to_add_selection is None:
+            # Set default if state is empty and mapping is available
+            if st.session_state.card_to_add_selection is None and card_mapping:
                 st.session_state.card_to_add_selection = sorted(card_mapping.keys())[0]
             
             st.selectbox(
                 "Choose a card*",
                 options=sorted(card_mapping.keys()),
-                key="card_to_add_selection" # Link to session state
+                key="card_to_add_selection"
             )
             
-            # This image preview will now update live
             if st.session_state.card_to_add_selection:
                 image_filename = card_mapping[st.session_state.card_to_add_selection]
                 st.image(os.path.join(IMAGE_DIR, image_filename))
     
-    else: # Add a custom card
+    else: 
         st.info(f"Your card will be saved with the default image ({DEFAULT_IMAGE}).")
         image_filename = DEFAULT_IMAGE
 
-    # --- THE FORM NOW ONLY CONTAINS DATA-ENTRY FIELDS ---
     with st.form("new_card_form"):
         
-        # Only show Bank/Name inputs if in "custom" mode
         if st.session_state.add_method == "Add a custom card":
             st.subheader("Card Details", anchor=False)
             bank = st.text_input("Bank Name*")
@@ -168,30 +172,29 @@ def show_add_card_form(card_mapping):
                 st.session_state.show_add_form = False
                 st.rerun()
 
-    # --- MODIFIED: Updated Save Logic ---
     if submitted:
         
-        # Get bank/name based on the add_method
         if st.session_state.add_method == "Choose from list":
             if not st.session_state.card_to_add_selection:
                 st.error("Please select a card from the list.")
                 return
             
-            # We already have the image filename
             image_filename = card_mapping[st.session_state.card_to_add_selection]
-            # Re-create bank and card name from the selection
             base_name = os.path.splitext(image_filename)[0]
             parts = base_name.split("_")
-            bank = parts[0]
+            
+            # --- MODIFIED: Use the helper function ---
+            bank_raw = parts[0]
+            bank = prettify_bank_name(bank_raw)
+            # --- End of modification ---
             card_name = " ".join(parts[1:])
         
-        else: # "Add a custom card"
+        else:
             if not bank or not card_name:
                 st.error("Bank Name and Card Name are required for custom cards.")
                 return
             image_filename = DEFAULT_IMAGE
         
-        # --- Validation for MM/YY (unchanged) ---
         month_match = re.match(r"^(0[1-9]|1[0-2])$", expiry_mm)
         if not month_match:
             st.error("Expiry MM must be a valid month (e.g., 01, 05, 12).")
@@ -204,7 +207,6 @@ def show_add_card_form(card_mapping):
         card_expiry_mm_yy = f"{expiry_mm}/{expiry_yy}"
         fee_month = MONTH_MAP.get(expiry_mm)
 
-        # --- Save logic (unchanged) ---
         new_card = {
             "Bank": bank, "Card Name": card_name, "Annual Fee": annual_fee,
             "Card Expiry (MM/YY)": card_expiry_mm_yy, "Month of Annual Fee": fee_month,
@@ -422,7 +424,7 @@ def show_dashboard(all_cards_df):
                 st.dataframe(details_df, hide_index=True)
 
 # =============================================================================
-# MAIN APP "ROUTER"
+# MAIN APP "ROUTER" (Unchanged)
 # =============================================================================
 def main():
     st.set_page_config(
