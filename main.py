@@ -24,26 +24,18 @@ MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_MAP = {f"{i+1:02d}": name for i, name in enumerate(MONTH_NAMES)}
 
-# --- NEW: Define all columns and their types to fix warning ---
 ALL_COLUMNS = [
     "Bank", "Card Name", "Annual Fee", "Card Expiry (MM/YY)", "Month of Annual Fee",
     "Date Applied", "Date Approved", "Date Received Card", 
     "Date Activated Card", "First Charge Date", "Image Filename"
 ]
 COLUMN_DTYPES = {
-    "Bank": "object",
-    "Card Name": "object",
-    "Annual Fee": "float",
-    "Card Expiry (MM/YY)": "object",
-    "Month of Annual Fee": "object",
-    "Date Applied": "datetime64[ns]",
-    "Date Approved": "datetime64[ns]",
-    "Date Received Card": "datetime64[ns]",
-    "Date Activated Card": "datetime64[ns]",
-    "First Charge Date": "datetime64[ns]",
-    "Image Filename": "object"
+    "Bank": "object", "Card Name": "object", "Annual Fee": "float",
+    "Card Expiry (MM/YY)": "object", "Month of Annual Fee": "object",
+    "Date Applied": "datetime64[ns]", "Date Approved": "datetime64[ns]",
+    "Date Received Card": "datetime64[ns]", "Date Activated Card": "datetime64[ns]",
+    "First Charge Date": "datetime64[ns]", "Image Filename": "object"
 }
-# --- End of new constants ---
 
 # --- Setup: Create data file if it doesn't exist ---
 if not os.path.exists(DATA_FILE):
@@ -62,20 +54,22 @@ if 'show_edit_form' not in st.session_state:
     st.session_state.show_edit_form = False
 if 'card_to_edit' not in st.session_state:
     st.session_state.card_to_edit = None
+# --- MODIFIED: Added new states for the add form ---
+if 'add_method' not in st.session_state:
+    st.session_state.add_method = "Choose from list"
+if 'card_to_add_selection' not in st.session_state:
+    st.session_state.card_to_add_selection = None
+# --- End of modification ---
 
 
 # --- Helper Functions ---
-
-# --- MODIFIED: This function is updated to fix the warning ---
 def load_data():
     """Loads the card data from the CSV file."""
     try:
         return pd.read_csv(DATA_FILE, parse_dates=DATE_COLUMNS)
     except pd.errors.EmptyDataError: 
-        # FIX: If file is empty, create a new DataFrame with all
-        # columns and data types explicitly defined.
         df = pd.DataFrame(columns=ALL_COLUMNS)
-        df = df.astype(COLUMN_DTYPES) # This prevents the concat warning
+        df = df.astype(COLUMN_DTYPES)
         return df
 
 def get_card_mapping():
@@ -98,42 +92,65 @@ def get_card_mapping():
 # =============================================================================
 # 1. "Add New Card" Page (Main Area)
 # =============================================================================
+# --- MODIFIED: This function is heavily restructured ---
 def show_add_card_form(card_mapping):
     st.title("Add a New Card", anchor=False)
-    add_method = st.radio(
+    
+    # --- WIDGETS MOVED OUTSIDE THE FORM ---
+    # These widgets now update live
+    st.radio(
         "How would you like to add a card?",
         ("Choose from list", "Add a custom card"),
-        horizontal=True
+        horizontal=True,
+        key="add_method" # Link to session state
     )
 
-    with st.form("new_card_form"):
-        bank, card_name, image_filename = None, None, None
-        
-        if add_method == "Choose from list":
-            if not card_mapping:
-                st.error("No pre-listed card images found in 'card_images' folder.")
-            else:
-                selected_display_name = st.selectbox(
-                    "Choose a card*",
-                    options=sorted(card_mapping.keys())
-                )
-                if selected_display_name:
-                    image_filename = card_mapping[selected_display_name]
-                    st.image(os.path.join(IMAGE_DIR, image_filename), width=200)
-                    base_name = os.path.splitext(image_filename)[0]
-                    parts = base_name.split("_")
-                    bank = parts[0]
-                    card_name = " ".join(parts[1:])
+    bank, card_name, image_filename = None, None, None
+
+    if st.session_state.add_method == "Choose from list":
+        if not card_mapping:
+            st.error("No pre-listed card images found in 'card_images' folder.")
+            st.session_state.card_to_add_selection = None
         else:
-            st.info(f"Your card will be saved with the default image ({DEFAULT_IMAGE}).")
+            # Set default if state is empty
+            if st.session_state.card_to_add_selection is None:
+                st.session_state.card_to_add_selection = sorted(card_mapping.keys())[0]
+            
+            st.selectbox(
+                "Choose a card*",
+                options=sorted(card_mapping.keys()),
+                key="card_to_add_selection" # Link to session state
+            )
+            
+            # This image preview will now update live
+            if st.session_state.card_to_add_selection:
+                image_filename = card_mapping[st.session_state.card_to_add_selection]
+                st.image(os.path.join(IMAGE_DIR, image_filename))
+    
+    else: # Add a custom card
+        st.info(f"Your card will be saved with the default image ({DEFAULT_IMAGE}).")
+        image_filename = DEFAULT_IMAGE
+
+    # --- THE FORM NOW ONLY CONTAINS DATA-ENTRY FIELDS ---
+    with st.form("new_card_form"):
+        
+        # Only show Bank/Name inputs if in "custom" mode
+        if st.session_state.add_method == "Add a custom card":
+            st.subheader("Card Details", anchor=False)
             bank = st.text_input("Bank Name*")
             card_name = st.text_input("Card Name*")
-            image_filename = DEFAULT_IMAGE
 
         st.divider()
         st.subheader("Enter Your Personal Details", anchor=False)
-        card_expiry_mm_yy = st.text_input("Card Expiry (MM/YY)*", placeholder="e.g., 05/27")
+        st.write("Card Expiry*")
+        col1, col2 = st.columns(2)
+        with col1:
+            expiry_mm = st.text_input("MM*", placeholder="05", max_chars=2, help="e.g., 05 for May")
+        with col2:
+            expiry_yy = st.text_input("YY*", placeholder="27", max_chars=2, help="e.g., 27 for 2027")
+
         annual_fee = st.number_input("Annual Fee ($)", min_value=0.0, step=1.00, format="%.2f")
+        
         st.write("---")
         st.subheader("Optional Dates", anchor=False)
         st.caption("You can leave these blank. To clear a set date, click the 'x' in the date widget.")
@@ -151,19 +168,43 @@ def show_add_card_form(card_mapping):
                 st.session_state.show_add_form = False
                 st.rerun()
 
+    # --- MODIFIED: Updated Save Logic ---
     if submitted:
-        if not bank or not card_name:
-            st.error("Bank Name and Card Name are required. Please check your inputs.")
+        
+        # Get bank/name based on the add_method
+        if st.session_state.add_method == "Choose from list":
+            if not st.session_state.card_to_add_selection:
+                st.error("Please select a card from the list.")
+                return
+            
+            # We already have the image filename
+            image_filename = card_mapping[st.session_state.card_to_add_selection]
+            # Re-create bank and card name from the selection
+            base_name = os.path.splitext(image_filename)[0]
+            parts = base_name.split("_")
+            bank = parts[0]
+            card_name = " ".join(parts[1:])
+        
+        else: # "Add a custom card"
+            if not bank or not card_name:
+                st.error("Bank Name and Card Name are required for custom cards.")
+                return
+            image_filename = DEFAULT_IMAGE
+        
+        # --- Validation for MM/YY (unchanged) ---
+        month_match = re.match(r"^(0[1-9]|1[0-2])$", expiry_mm)
+        if not month_match:
+            st.error("Expiry MM must be a valid month (e.g., 01, 05, 12).")
             return
-
-        match = re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", card_expiry_mm_yy)
-        if not match:
-            st.error("Card Expiry (MM/YY) is required and must be in MM/YY format.")
+        year_match = re.match(r"^\d{2}$", expiry_yy)
+        if not year_match:
+            st.error("Expiry YY must be two digits (e.g., 25, 27).")
             return
         
-        month_str = match.group(1)
-        fee_month = MONTH_MAP.get(month_str)
+        card_expiry_mm_yy = f"{expiry_mm}/{expiry_yy}"
+        fee_month = MONTH_MAP.get(expiry_mm)
 
+        # --- Save logic (unchanged) ---
         new_card = {
             "Bank": bank, "Card Name": card_name, "Annual Fee": annual_fee,
             "Card Expiry (MM/YY)": card_expiry_mm_yy, "Month of Annual Fee": fee_month,
@@ -185,9 +226,9 @@ def show_add_card_form(card_mapping):
         st.rerun()
 
 # =============================================================================
-# 2. "Edit Card" Page
+# 2. "Edit Card" Page (Unchanged)
 # =============================================================================
-def show_edit_card_form():
+def show_edit_form():
     st.title("Edit Card Details", anchor=False)
 
     all_cards_df = load_data()
@@ -200,6 +241,11 @@ def show_edit_card_form():
         return
 
     card_data = all_cards_df.iloc[card_index]
+    
+    try:
+        default_mm, default_yy = card_data["Card Expiry (MM/YY)"].split('/')
+    except (ValueError, AttributeError):
+        default_mm, default_yy = "", ""
 
     with st.form("edit_card_form"):
         st.subheader(f"Editing: {card_data['Bank']} {card_data['Card Name']}", anchor=False)
@@ -211,10 +257,13 @@ def show_edit_card_form():
         st.divider()
         st.subheader("Edit Personal Details", anchor=False)
         
-        card_expiry_mm_yy = st.text_input(
-            "Card Expiry (MM/YY)*", 
-            value=card_data["Card Expiry (MM/YY)"]
-        )
+        st.write("Card Expiry*")
+        col1, col2 = st.columns(2)
+        with col1:
+            expiry_mm = st.text_input("MM*", value=default_mm, max_chars=2, help="e.g., 05 for May")
+        with col2:
+            expiry_yy = st.text_input("YY*", value=default_yy, max_chars=2, help="e.g., 27 for 2027")
+        
         annual_fee = st.number_input(
             "Annual Fee ($)", 
             min_value=0.0, 
@@ -228,32 +277,13 @@ def show_edit_card_form():
         
         def get_date(date_val):
             return pd.to_datetime(date_val) if pd.notna(date_val) else None
+        
+        applied_date = st.date_input("Date Applied", value=get_date(card_data["Date Applied"]), format=st.session_state.date_format)
+        approved_date = st.date_input("Date Approved", value=get_date(card_data["Date Approved"]), format=st.session_state.date_format)
+        received_date = st.date_input("Date Received Card", value=get_date(card_data["Date Received Card"]), format=st.session_state.date_format)
+        activated_date = st.date_input("Date Activated Card", value=get_date(card_data["Date Activated Card"]), format=st.session_state.date_format)
+        first_charge_date = st.date_input("First Charge Date", value=get_date(card_data["First Charge Date"]), format=st.session_state.date_format)
 
-        applied_date = st.date_input(
-            "Date Applied", 
-            value=get_date(card_data["Date Applied"]), 
-            format=st.session_state.date_format
-        )
-        approved_date = st.date_input(
-            "Date Approved", 
-            value=get_date(card_data["Date Approved"]), 
-            format=st.session_state.date_format
-        )
-        received_date = st.date_input(
-            "Date Received Card", 
-            value=get_date(card_data["Date Received Card"]), 
-            format=st.session_state.date_format
-        )
-        activated_date = st.date_input(
-            "Date Activated Card", 
-            value=get_date(card_data["Date Activated Card"]), 
-            format=st.session_state.date_format
-        )
-        first_charge_date = st.date_input(
-            "First Charge Date", 
-            value=get_date(card_data["First Charge Date"]), 
-            format=st.session_state.date_format
-        )
 
         col1, col2 = st.columns([1, 1])
         with col1:
@@ -269,13 +299,18 @@ def show_edit_card_form():
             st.error("Bank Name and Card Name are required.")
             return
 
-        match = re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", card_expiry_mm_yy)
-        if not match:
-            st.error("Card Expiry (MM/YY) is required and must be in MM/YY format.")
+        month_match = re.match(r"^(0[1-9]|1[0-2])$", expiry_mm)
+        if not month_match:
+            st.error("Expiry MM must be a valid month (e.g., 01, 05, 12).")
             return
         
-        month_str = match.group(1)
-        fee_month = MONTH_MAP.get(month_str)
+        year_match = re.match(r"^\d{2}$", expiry_yy)
+        if not year_match:
+            st.error("Expiry YY must be two digits (e.g., 25, 27).")
+            return
+        
+        card_expiry_mm_yy = f"{expiry_mm}/{expiry_yy}"
+        fee_month = MONTH_MAP.get(expiry_mm)
 
         all_cards_df.loc[card_index, "Bank"] = bank
         all_cards_df.loc[card_index, "Card Name"] = card_name
@@ -296,7 +331,7 @@ def show_edit_card_form():
         st.rerun()
 
 # =============================================================================
-# 3. Main Dashboard Page
+# 3. Main Dashboard Page (Unchanged)
 # =============================================================================
 def show_dashboard(all_cards_df):
     st.sidebar.selectbox(
@@ -310,12 +345,13 @@ def show_dashboard(all_cards_df):
     
     st.title("💳 Credit Card Dashboard", anchor=False)
 
-    st.header("Annual Fee Notifications", anchor=False)
     today = datetime.today()
     current_month_index = today.month - 1
-    next_month_index = (today.month % 12)
+    next_month_index = (current_month_index + 1) % 12
     current_month_name = MONTH_NAMES[current_month_index]
     next_month_name = MONTH_NAMES[next_month_index]
+
+    st.header("Annual Fee Notifications", anchor=False)
     cards_due_this_month = all_cards_df[all_cards_df["Month of Annual Fee"] == current_month_name]
     cards_due_next_month = all_cards_df[all_cards_df["Month of Annual Fee"] == next_month_name]
     
@@ -345,14 +381,30 @@ def show_dashboard(all_cards_df):
             if not os.path.exists(image_path):
                 image_path = os.path.join(IMAGE_DIR, DEFAULT_IMAGE)
             if os.path.exists(image_path):
-                st.image(image_path, width=150)
+                st.image(image_path)
             else:
                 st.caption("No Image")
 
         with col2:
             st.subheader(f"{card['Bank']} {card['Card Name']}", anchor=False)
-            st.metric(label="Annual Fee", value=f"${card['Annual Fee']:.2f}", delta=f"Due in {card['Month of Annual Fee']}")
             
+            st.metric(label="Annual Fee", value=f"${card['Annual Fee']:.2f}")
+
+            due_month_name = card['Month of Annual Fee']
+            try:
+                due_month_index = MONTH_NAMES.index(due_month_name)
+            except (ValueError, TypeError):
+                due_month_index = -1
+            
+            if due_month_index == current_month_index:
+                st.error(f"❗ **Due this month** ({due_month_name})")
+            elif due_month_index == next_month_index:
+                st.warning(f"⚠️ **Due next month** ({due_month_name})")
+            elif due_month_index != -1:
+                st.success(f"✅ Due in {due_month_name}")
+            else:
+                st.info(f"Due in {due_month_name}")
+
             if st.button("Edit Card", key=f"edit_{index}"):
                 st.session_state.card_to_edit = index
                 st.session_state.show_edit_form = True
@@ -382,6 +434,19 @@ def main():
         }
     )
     
+    st.markdown("""
+    <style>
+    /* Target all image elements within Streamlit */
+    .stImage img {
+        /* Set a fixed box size */
+        width: 158px;
+        height: 100px;
+        /* Fit the image within the box, padding as needed */
+        object-fit: contain; 
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     all_cards_df = load_data()
     card_mapping = get_card_mapping()
 
@@ -389,7 +454,7 @@ def main():
         show_add_card_form(card_mapping)
     
     elif st.session_state.show_edit_form:
-        show_edit_card_form()
+        show_edit_form()
         
     elif all_cards_df.empty:
         st.title("Welcome to your Credit Card Tracker!", anchor=False)
