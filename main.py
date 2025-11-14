@@ -3,11 +3,13 @@ import pandas as pd
 from datetime import datetime
 import os
 import re
+import json # --- NEW --- Added for the tagging system
 from collections import Counter
 from pandas.tseries.offsets import DateOffset # To add 13 months
 
 # --- Configuration ---
 DATA_FILE = "my_cards.csv"
+TAGS_FILE = "my_tags.json" # --- NEW --- File to store the master list of tags
 IMAGE_DIR = "card_images"
 DEFAULT_IMAGE = "default.png"
 
@@ -18,24 +20,22 @@ STRFTIME_MAP = {
     "MM/DD/YYYY": "%m/%d/%Y",
     "YYYY-MM-DD": "%Y-%m-%d"
 }
-# --- MODIFIED: Added new date columns ---
 DATE_COLUMNS = [
     "Date Applied", "Date Approved", "Date Received Card",
     "Date Activated Card", "First Charge Date", 
     "Cancellation Date", "Re-apply Date"
 ]
-# --- End of modification ---
 
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_MAP = {f"{i+1:02d}": name for i, name in enumerate(MONTH_NAMES)}
 
-# --- MODIFIED: Added new columns ---
+# --- MODIFICATION: Added Tags ---
 ALL_COLUMNS = [
     "Bank", "Card Name", "Annual Fee", "Card Expiry (MM/YY)", "Month of Annual Fee",
     "Date Applied", "Date Approved", "Date Received Card",
     "Date Activated Card", "First Charge Date", "Image Filename", "Sort Order",
-    "Notes", "Cancellation Date", "Re-apply Date"
+    "Notes", "Cancellation Date", "Re-apply Date", "Tags" # <-- Added Tags
 ]
 COLUMN_DTYPES = {
     "Bank": "object", "Card Name": "object", "Annual Fee": "float",
@@ -44,7 +44,8 @@ COLUMN_DTYPES = {
     "Date Received Card": "datetime64[ns]", "Date Activated Card": "datetime64[ns]",
     "First Charge Date": "datetime64[ns]", "Image Filename": "object",
     "Sort Order": "int",
-    "Notes": "object", "Cancellation Date": "datetime64[ns]", "Re-apply Date": "datetime64[ns]"
+    "Notes": "object", "Cancellation Date": "datetime64[ns]", "Re-apply Date": "datetime64[ns]",
+    "Tags": "object" # <-- Added Tags
 }
 # --- End of modification ---
 
@@ -79,45 +80,49 @@ if 'show_details_page' not in st.session_state:
     st.session_state.show_details_page = False
 if 'card_to_view' not in st.session_state:
     st.session_state.card_to_view = None
+# --- NEW: Added state for Tag Manager ---
+if 'show_tag_manager' not in st.session_state:
+    st.session_state.show_tag_manager = False
+# --- End of new ---
 
 
-# --- Helper Functions ---
-# --- MODIFIED: Updated load_data to handle missing columns ---
+# =============================================================================
+#  Helper Functions
+# =============================================================================
 def load_data():
     """Loads the card data from the CSV file."""
     try:
-        # Step 1: Read the CSV *without* parsing dates initially.
         df = pd.read_csv(DATA_FILE)
-
     except pd.errors.EmptyDataError:
-        # File is totally empty, create a new one with correct types
         df = pd.DataFrame(columns=ALL_COLUMNS)
         df = df.astype(COLUMN_DTYPES)
         return df
 
-    # Step 2: Now that we have a DataFrame, check for missing columns.
-    # This handles "migration" from an old CSV.
+    # Check for missing columns (migration)
     if "Sort Order" not in df.columns:
         df["Sort Order"] = range(1, len(df) + 1)
     if "Notes" not in df.columns:
         df["Notes"] = ""
     if "Cancellation Date" not in df.columns:
-        df["Cancellation Date"] = pd.NaT # Add the column with Null dates
+        df["Cancellation Date"] = pd.NaT
     if "Re-apply Date" not in df.columns:
-        df["Re-apply Date"] = pd.NaT # Add the column with Null dates
+        df["Re-apply Date"] = pd.NaT
+    if "Tags" not in df.columns:
+        df["Tags"] = ""
         
-    # Step 3: Now that all columns are guaranteed to exist,
-    # *manually* parse/coerce all date columns.
     for col in DATE_COLUMNS:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
-    # Step 4: Ensure other types are correct too.
     df["Sort Order"] = pd.to_numeric(df["Sort Order"], errors='coerce').fillna(99).astype(int)
     df["Sort Order"] = df["Sort Order"].apply(lambda x: 99 if x < 1 else x)
-    df["Notes"] = df["Notes"].astype(str).fillna("")
+    
+    # --- MODIFICATION: Swapped fillna and astype ---
+    # Fills any NaN/None with "" (empty string) BEFORE converting type
+    df["Notes"] = df["Notes"].fillna("").astype(str)
+    df["Tags"] = df["Tags"].fillna("").astype(str)
+    # --- End of modification ---
 
     return df
-# --- End of modification ---
 
 def prettify_bank_name(bank_name):
     """Converts file-safe bank names to display-friendly names."""
@@ -144,6 +149,32 @@ def get_card_mapping():
     except FileNotFoundError:
         st.error(f"Image directory '{IMAGE_DIR}' not found. Please create it.")
     return card_mapping
+
+# --- NEW: Helper functions for tags ---
+def load_tags():
+    """Loads the master list of tags from tags.json."""
+    if not os.path.exists(TAGS_FILE):
+        return []
+    try:
+        with open(TAGS_FILE, 'r') as f:
+            tags = json.load(f)
+            return sorted(list(set(tags))) # Ensure sorted and unique
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
+
+def save_tags(tags_list):
+    """Saves the master list of tags to tags.json."""
+    # Ensure sorted and unique
+    unique_sorted_tags = sorted(list(set(t.strip() for t in tags_list if t.strip())))
+    try:
+        with open(TAGS_FILE, 'w') as f:
+            json.dump(unique_sorted_tags, f, indent=4)
+        return True
+    except Exception as e:
+        st.error(f"Failed to save tags: {e}")
+        return False
+# --- End of new helper functions ---
+
 
 # =============================================================================
 # 1. "Add New Card" Page (Main Area)
@@ -198,10 +229,13 @@ def show_add_card_form(card_mapping):
             expiry_yy = st.text_input("YY*", placeholder="27", max_chars=2, help="e.g., 27 for 2027")
         annual_fee = st.number_input("Annual Fee ($)", min_value=0.0, step=1.00, format="%.2f")
 
-        # --- MODIFIED: Added Notes field ---
+        # --- NEW: Add Tags multiselect ---
+        all_tags = load_tags()
+        selected_tags = st.multiselect("Tags", options=all_tags)
+        # --- End of new ---
+
         st.subheader("Notes", anchor=False)
         notes = st.text_area("Add any notes for this card (e.g., waiver info, benefits).")
-        # --- End of modification ---
 
         st.write("---")
         st.subheader("Optional Dates", anchor=False)
@@ -250,7 +284,7 @@ def show_add_card_form(card_mapping):
         else:
             new_sort_order = int(max_sort + 1)
 
-        # --- MODIFIED: Added new fields to save ---
+        # --- MODIFICATION: Added Tags to save ---
         new_card = {
             "Bank": bank, "Card Name": card_name, "Annual Fee": annual_fee,
             "Card Expiry (MM/YY)": card_expiry_mm_yy, "Month of Annual Fee": fee_month,
@@ -263,7 +297,8 @@ def show_add_card_form(card_mapping):
             "Sort Order": new_sort_order,
             "Notes": notes,
             "Cancellation Date": pd.NaT,
-            "Re-apply Date": pd.NaT
+            "Re-apply Date": pd.NaT,
+            "Tags": ",".join(selected_tags) # <-- Save tags as comma-separated string
         }
         # --- End of modification ---
 
@@ -307,10 +342,16 @@ def show_edit_form():
 
         annual_fee = st.number_input("Annual Fee ($)", min_value=0.0, step=1.00, format="%.2f", value=card_data["Annual Fee"])
         
-        # --- MODIFIED: Added Notes field ---
+        # --- NEW: Add Tags multiselect ---
+        all_tags = load_tags()
+        # Load default tags
+        default_tags_str = card_data.get("Tags", "")
+        default_tags = [t for t in default_tags_str.split(',') if t]
+        selected_tags = st.multiselect("Tags", options=all_tags, default=default_tags)
+        # --- End of new ---
+
         st.subheader("Notes", anchor=False)
-        notes = st.text_area("Card notes", value=card_data.get("Notes", "")) # .get() for safety
-        # --- End of modification ---
+        notes = st.text_area("Card notes", value=card_data.get("Notes", ""))
         
         st.write("---")
         st.subheader("Edit Optional Dates", anchor=False)
@@ -343,7 +384,7 @@ def show_edit_form():
         card_expiry_mm_yy = f"{expiry_mm}/{expiry_yy}"
         fee_month = MONTH_MAP.get(expiry_mm)
 
-        # --- MODIFIED: Added Notes to save logic ---
+        # --- MODIFICATION: Added Tags to save logic ---
         all_cards_df.loc[card_index, "Bank"] = bank
         all_cards_df.loc[card_index, "Card Name"] = card_name
         all_cards_df.loc[card_index, "Annual Fee"] = annual_fee
@@ -355,6 +396,7 @@ def show_edit_form():
         all_cards_df.loc[card_index, "Date Activated Card"] = pd.to_datetime(activated_date)
         all_cards_df.loc[card_index, "First Charge Date"] = pd.to_datetime(first_charge_date)
         all_cards_df.loc[card_index, "Notes"] = notes
+        all_cards_df.loc[card_index, "Tags"] = ",".join(selected_tags) # <-- Save tags
         # --- End of modification ---
 
         all_cards_df.to_csv(DATA_FILE, index=False)
@@ -369,6 +411,12 @@ def show_dashboard(all_cards_df):
     if st.sidebar.button("Add New Card"):
         st.session_state.show_add_form = True; st.rerun()
     
+    # --- NEW: Add Tag Manager button ---
+    if st.sidebar.button("Manage Tags"):
+        st.session_state.show_tag_manager = True
+        st.rerun()
+    # --- End of new ---
+
     st.sidebar.divider()
     
     show_cancelled = st.sidebar.checkbox("Show Cancelled Cards", value=True)
@@ -387,8 +435,8 @@ def show_dashboard(all_cards_df):
 
     st.title("💳 Credit Card Dashboard", anchor=False)
 
-    today = datetime.today()
-    current_month_index = today.month - 1
+    today_dt = pd.to_datetime(datetime.today()) # --- MODIFICATION: Use this consistent "today" ---
+    current_month_index = today_dt.month - 1
     next_month_index = (current_month_index + 1) % 12
     current_month_name = MONTH_NAMES[current_month_index]
     next_month_name = MONTH_NAMES[next_month_index]
@@ -433,16 +481,58 @@ def show_dashboard(all_cards_df):
         for _, card_data in cards_due_next_month.iterrows():
             fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
             st.info(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
+    
+    st.divider() # --- NEW --- Added divider
+
+    # --- NEW: Re-application Notifications Section ---
+    st.header("Re-application Notifications", anchor=False)
+    st.caption("Shows cards that were cancelled and are now (or soon) eligible to re-apply for a new bonus.")
+    
+    # We must look at the *original* dataframe (all_cards_df)
+    # because this list *only* applies to cancelled cards.
+    reapply_df = all_cards_df[pd.notna(all_cards_df['Re-apply Date'])].copy()
+
+    # Find cards where the re-apply date is in the past or within the next 60 days
+    eligible_cards = reapply_df[
+        (reapply_df['Re-apply Date'] <= today_dt + pd.DateOffset(days=60))
+    ].sort_values(by='Re-apply Date')
+
+    if eligible_cards.empty:
+        st.write("No cards are eligible for re-application soon.")
+    else:
+        for _, card in eligible_cards.iterrows():
+            card_name = f"{card['Bank']} {card['Card Name']}"
+            reapply_date_str = card['Re-apply Date'].strftime('%d %b %Y')
+            
+            if card['Re-apply Date'] <= today_dt:
+                st.success(f"**{card_name}**: You are **now eligible** to re-apply! (Eligible since {reapply_date_str})")
+            else:
+                days_until = (card['Re-apply Date'] - today_dt).days
+                st.info(f"**{card_name}**: Eligible to re-apply in **{days_until} days**. (On {reapply_date_str})")
+    
+    st.divider()
+    # --- End of new section ---
+
 
     st.header("All My Cards", anchor=False)
     
     cards_to_display_df['due_sort_key'] = (cards_to_display_df['due_month_index'] - current_month_index + 12) % 12
 
-    f_col1, f_col2 = st.columns(2)
+    # --- MODIFICATION: Added column for Tag Filter ---
+    f_col1, f_col2, f_col3 = st.columns(3)
+    # --- End of modification ---
+    
     with f_col1:
         bank_options = sorted(cards_to_display_df['Bank'].unique())
         selected_banks = st.multiselect("Filter by Bank", options=bank_options)
+    
+    # --- NEW: Added Tag Filter ---
     with f_col2:
+        tag_options = load_tags()
+        selected_tags = st.multiselect("Filter by Tag", options=tag_options)
+    # --- End of new ---
+        
+    with f_col3: # Changed from f_col2
         sort_options = {
             "Manual (Custom Order)": "Sort Order",
             "Due Date (Soonest First)": "due_sort_key",
@@ -460,6 +550,18 @@ def show_dashboard(all_cards_df):
     cards_to_show_df_sorted = cards_to_display_df.copy()
     if selected_banks:
         cards_to_show_df_sorted = cards_to_show_df_sorted[cards_to_show_df_sorted['Bank'].isin(selected_banks)]
+
+    # --- NEW: Added filtering logic for tags ---
+    if selected_tags:
+        # This logic ensures the card has ALL selected tags
+        def check_tags(card_tags_str):
+            card_tags = set(t.strip() for t in card_tags_str.split(','))
+            return all(tag in card_tags for tag in selected_tags)
+        
+        cards_to_show_df_sorted = cards_to_show_df_sorted[
+            cards_to_show_df_sorted['Tags'].apply(check_tags)
+        ]
+    # --- End of new ---
 
     sort_logic = sort_options[selected_sort_key]
     if sort_logic == "Annual Fee_desc":
@@ -506,6 +608,13 @@ def show_dashboard(all_cards_df):
                     st.success(f"✅ Due in {due_month_name}")
                 else:
                     st.info(f"Due in {due_month_name}")
+            
+            # --- NEW: Display tags if they exist ---
+            tags_str = card_row.get("Tags", "")
+            if tags_str:
+                # Displaying as simple text with backticks
+                st.markdown(f"**Tags:** `{tags_str.replace(',', ', ')}`")
+            # --- End of new ---
 
             st.write("") 
             b_col1, b_col2, b_col3, b_col4 = st.columns([1, 1, 1, 1])
@@ -547,9 +656,7 @@ def show_dashboard(all_cards_df):
             
             with b_col4:
                 if st.session_state.get(f"confirm_permanent_delete_{index}", False):
-                    # --- MODIFIED: Changed type="secondary" to type="primary" ---
                     if st.button("CONFIRM DELETE", key=f"confirm_delete_permanent_{index}", type="primary", use_container_width=True):
-                    # --- End of modification ---
                         df = load_data()
                         df = df.drop(index).reset_index(drop=True)
                         df.to_csv(DATA_FILE, index=False)
@@ -577,11 +684,14 @@ def show_dashboard(all_cards_df):
                     c_col1.metric("Cancelled On", pd.to_datetime(card_row["Cancellation Date"]).strftime("%d %b %Y"))
                     c_col2.metric("Re-apply After", pd.to_datetime(card_row["Re-apply Date"]).strftime("%d %b %Y"))
 
+                # --- MODIFICATION: Added "Tags" to drop list ---
                 details_df = card_row.to_frame().T.drop(columns=[
                     "Bank", "Card Name", "Annual Fee", "Month of Annual Fee", 
                     "Image Filename", "due_month_index", "due_sort_key", "Sort Order",
-                    "Notes", "Cancellation Date", "Re-apply Date"
+                    "Notes", "Cancellation Date", "Re-apply Date", "Tags"
                 ])
+                # --- End of modification ---
+                
                 for col in DATE_COLUMNS:
                     if col in details_df.columns and col not in ["Cancellation Date", "Re-apply Date"]:
                         details_df[col] = pd.to_datetime(details_df[col]).dt.strftime(strftime_code).replace('NaT', 'N/A')
@@ -594,15 +704,13 @@ def show_sort_order_form():
     st.title("Edit Manual Card Order", anchor=False)
     st.write("Change the numbers to reorder your cards. Lower numbers appear first. Click 'Save Order' when done.")
     
-    # --- MODIFIED: Only show ACTIVE cards in the sort list ---
     all_cards_df = load_data()
     active_cards_df = all_cards_df[pd.isna(all_cards_df['Cancellation Date'])].sort_values(by="Sort Order")
     st.info("Only active cards are shown. Cancelled cards cannot be re-ordered.")
-    # --- End of modification ---
     
     with st.form("sort_order_form"):
         if st.session_state.duplicate_sort_numbers:
-             st.error(f"Found duplicate numbers: {', '.join(map(str, st.session_state.duplicate_sort_numbers))}. Please fix and save again.")
+                st.error(f"Found duplicate numbers: {', '.join(map(str, st.session_state.duplicate_sort_numbers))}. Please fix and save again.")
         
         for index, card in active_cards_df.iterrows():
             col1, col2 = st.columns([1, 3])
@@ -693,13 +801,17 @@ def show_details_page():
         st.markdown(f"**Fee Month:** {card['Month of Annual Fee']}")
         st.markdown(f"**Card Expiry:** {card['Card Expiry (MM/YY)']}")
 
-    # --- MODIFIED: Show Notes ---
+        # --- NEW: Display tags if they exist ---
+        tags_str = card.get("Tags", "")
+        if tags_str:
+            st.markdown(f"**Tags:** `{tags_str.replace(',', ', ')}`")
+        # --- End of new ---
+
     notes = card.get("Notes", "")
     if notes and pd.notna(notes):
         st.divider()
         st.subheader("Notes", anchor=False)
         st.markdown(notes)
-    # --- End of modification ---
 
     st.divider()
     st.subheader("Card Dates", anchor=False)
@@ -721,14 +833,71 @@ def show_details_page():
     with d_col3:
         st.metric("First Charge Date", format_date_display(card["First Charge Date"]))
 
-    # --- MODIFIED: Show cancellation dates if they exist ---
     if pd.notna(card["Cancellation Date"]):
         st.divider()
         st.subheader("Cancellation Info", anchor=False)
         c_col1, c_col2 = st.columns(2)
         c_col1.metric("Cancelled On", format_date_display(card["Cancellation Date"]))
         c_col2.metric("Re-apply After", format_date_display(card["Re-apply Date"]))
-    # --- End of modification ---
+
+
+# =============================================================================
+# 6. "Manage Tags" Page (NEW)
+# =============================================================================
+def show_tag_manager_page():
+    st.title("🏷️ Manage Tags", anchor=False)
+    if st.button("← Back to Dashboard"):
+        st.session_state.show_tag_manager = False
+        st.rerun()
+    
+    st.write("Here you can add or remove tags from the master list. This list will appear as options when you add or edit a card.")
+    
+    all_tags = load_tags()
+    
+    st.divider()
+    st.subheader("Add a New Tag", anchor=False)
+    with st.form("add_tag_form", clear_on_submit=True):
+        new_tag = st.text_input("New Tag Name")
+        submitted = st.form_submit_button("Add Tag")
+        
+        if submitted and new_tag:
+            if new_tag in all_tags:
+                st.warning(f"Tag '{new_tag}' already exists.")
+            else:
+                all_tags.append(new_tag)
+                if save_tags(all_tags):
+                    st.success(f"Added tag '{new_tag}'.")
+                    st.rerun() # Rerun to show new tag in list below
+                
+    st.divider()
+    st.subheader("Existing Tags", anchor=False)
+    
+    if not all_tags:
+        st.info("No tags added yet.")
+    
+    # Display tags in columns for a cleaner look
+    num_columns = 4
+    cols = st.columns(num_columns)
+    
+    for i, tag in enumerate(all_tags):
+        col_index = i % num_columns
+        with cols[col_index]:
+            # Use a unique key for each button
+            if st.button(f"Delete: {tag}", key=f"del_tag_{tag}", use_container_width=True):
+                all_tags.remove(tag)
+                if save_tags(all_tags):
+                    st.success(f"Removed tag '{tag}'.")
+                    # Also remove this tag from all cards that have it
+                    df = load_data()
+                    def remove_tag(tags_str):
+                        tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
+                        if tag in tags_list:
+                            tags_list.remove(tag)
+                        return ",".join(tags_list)
+                    
+                    df["Tags"] = df["Tags"].apply(remove_tag)
+                    df.to_csv(DATA_FILE, index=False)
+                    st.rerun()
 
 
 # =============================================================================
@@ -773,6 +942,10 @@ def main():
         show_sort_order_form()
     elif st.session_state.show_details_page:
         show_details_page()
+    # --- NEW: Added Tag Manager page to router ---
+    elif st.session_state.show_tag_manager:
+        show_tag_manager_page()
+    # --- End of new ---
     elif all_cards_df.empty:
         st.title("Welcome to your Credit Card Tracker!", anchor=False)
         col1, col2, col3 = st.columns([1, 1, 1])

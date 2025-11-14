@@ -1,5 +1,6 @@
 # Personal data file - DO NOT COMMIT
 my_cards.csv
+my_tags.json
 
 # Python cache files
 __pycache__/
