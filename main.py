@@ -411,11 +411,9 @@ def show_dashboard(all_cards_df):
     if st.sidebar.button("Add New Card"):
         st.session_state.show_add_form = True; st.rerun()
     
-    # --- NEW: Add Tag Manager button ---
     if st.sidebar.button("Manage Tags"):
         st.session_state.show_tag_manager = True
         st.rerun()
-    # --- End of new ---
 
     st.sidebar.divider()
     
@@ -435,7 +433,7 @@ def show_dashboard(all_cards_df):
 
     st.title("💳 Credit Card Dashboard", anchor=False)
 
-    today_dt = pd.to_datetime(datetime.today()) # --- MODIFICATION: Use this consistent "today" ---
+    today_dt = pd.to_datetime(datetime.today())
     current_month_index = today_dt.month - 1
     next_month_index = (current_month_index + 1) % 12
     current_month_name = MONTH_NAMES[current_month_index]
@@ -482,17 +480,12 @@ def show_dashboard(all_cards_df):
             fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
             st.info(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
     
-    st.divider() # --- NEW --- Added divider
+    st.divider()
 
-    # --- NEW: Re-application Notifications Section ---
     st.header("Re-application Notifications", anchor=False)
     st.caption("Shows cards that were cancelled and are now (or soon) eligible to re-apply for a new bonus.")
     
-    # We must look at the *original* dataframe (all_cards_df)
-    # because this list *only* applies to cancelled cards.
     reapply_df = all_cards_df[pd.notna(all_cards_df['Re-apply Date'])].copy()
-
-    # Find cards where the re-apply date is in the past or within the next 60 days
     eligible_cards = reapply_df[
         (reapply_df['Re-apply Date'] <= today_dt + pd.DateOffset(days=60))
     ].sort_values(by='Re-apply Date')
@@ -511,28 +504,22 @@ def show_dashboard(all_cards_df):
                 st.info(f"**{card_name}**: Eligible to re-apply in **{days_until} days**. (On {reapply_date_str})")
     
     st.divider()
-    # --- End of new section ---
-
 
     st.header("All My Cards", anchor=False)
     
     cards_to_display_df['due_sort_key'] = (cards_to_display_df['due_month_index'] - current_month_index + 12) % 12
 
-    # --- MODIFICATION: Added column for Tag Filter ---
     f_col1, f_col2, f_col3 = st.columns(3)
-    # --- End of modification ---
     
     with f_col1:
         bank_options = sorted(cards_to_display_df['Bank'].unique())
         selected_banks = st.multiselect("Filter by Bank", options=bank_options)
     
-    # --- NEW: Added Tag Filter ---
     with f_col2:
         tag_options = load_tags()
         selected_tags = st.multiselect("Filter by Tag", options=tag_options)
-    # --- End of new ---
         
-    with f_col3: # Changed from f_col2
+    with f_col3:
         sort_options = {
             "Manual (Custom Order)": "Sort Order",
             "Due Date (Soonest First)": "due_sort_key",
@@ -551,9 +538,7 @@ def show_dashboard(all_cards_df):
     if selected_banks:
         cards_to_show_df_sorted = cards_to_show_df_sorted[cards_to_show_df_sorted['Bank'].isin(selected_banks)]
 
-    # --- NEW: Added filtering logic for tags ---
     if selected_tags:
-        # This logic ensures the card has ALL selected tags
         def check_tags(card_tags_str):
             card_tags = set(t.strip() for t in card_tags_str.split(','))
             return all(tag in card_tags for tag in selected_tags)
@@ -561,7 +546,6 @@ def show_dashboard(all_cards_df):
         cards_to_show_df_sorted = cards_to_show_df_sorted[
             cards_to_show_df_sorted['Tags'].apply(check_tags)
         ]
-    # --- End of new ---
 
     sort_logic = sort_options[selected_sort_key]
     if sort_logic == "Annual Fee_desc":
@@ -591,10 +575,19 @@ def show_dashboard(all_cards_df):
             st.subheader(f"{card_row['Bank']} {card_row['Card Name']}", anchor=False)
             
             is_cancelled = pd.notna(card_row["Cancellation Date"])
+            
+            # --- MODIFICATION: Using st.metric for the large text display ---
             if is_cancelled:
                 st.error("Status: Cancelled")
+                # Use columns and metrics for the large text format
+                c_col1, c_col2 = st.columns(2)
+                with c_col1:
+                    st.metric("Cancelled On", pd.to_datetime(card_row["Cancellation Date"]).strftime("%d %b %Y"))
+                with c_col2:
+                    st.metric("Re-apply After", pd.to_datetime(card_row["Re-apply Date"]).strftime("%d %b %Y"))
             else:
                 st.metric(label="Annual Fee", value=f"${card_row['Annual Fee']:.2f}")
+            # --- End of modification ---
 
             due_month_name = card_row['Month of Annual Fee']
             due_month_index = card_row['due_month_index'] 
@@ -609,12 +602,14 @@ def show_dashboard(all_cards_df):
                 else:
                     st.info(f"Due in {due_month_name}")
             
-            # --- NEW: Display tags if they exist ---
             tags_str = card_row.get("Tags", "")
             if tags_str:
-                # Displaying as simple text with backticks
                 st.markdown(f"**Tags:** `{tags_str.replace(',', ', ')}`")
-            # --- End of new ---
+
+            notes = card_row.get("Notes", "")
+            if notes and pd.notna(notes):
+                st.markdown("**Notes:**")
+                st.markdown(notes)
 
             st.write("") 
             b_col1, b_col2, b_col3, b_col4 = st.columns([1, 1, 1, 1])
@@ -674,23 +669,11 @@ def show_dashboard(all_cards_df):
                         st.rerun()
 
             with st.expander("Show All Dates and Details"):
-                notes = card_row.get("Notes", "")
-                if notes and pd.notna(notes):
-                    st.markdown("**Notes:**")
-                    st.markdown(notes)
-                
-                if is_cancelled:
-                    c_col1, c_col2 = st.columns(2)
-                    c_col1.metric("Cancelled On", pd.to_datetime(card_row["Cancellation Date"]).strftime("%d %b %Y"))
-                    c_col2.metric("Re-apply After", pd.to_datetime(card_row["Re-apply Date"]).strftime("%d %b %Y"))
-
-                # --- MODIFICATION: Added "Tags" to drop list ---
                 details_df = card_row.to_frame().T.drop(columns=[
                     "Bank", "Card Name", "Annual Fee", "Month of Annual Fee", 
                     "Image Filename", "due_month_index", "due_sort_key", "Sort Order",
                     "Notes", "Cancellation Date", "Re-apply Date", "Tags"
                 ])
-                # --- End of modification ---
                 
                 for col in DATE_COLUMNS:
                     if col in details_df.columns and col not in ["Cancellation Date", "Re-apply Date"]:
@@ -842,7 +825,7 @@ def show_details_page():
 
 
 # =============================================================================
-# 6. "Manage Tags" Page (NEW)
+# 6. "Manage Tags" Page (Solution 2)
 # =============================================================================
 def show_tag_manager_page():
     st.title("🏷️ Manage Tags", anchor=False)
@@ -867,37 +850,45 @@ def show_tag_manager_page():
                 all_tags.append(new_tag)
                 if save_tags(all_tags):
                     st.success(f"Added tag '{new_tag}'.")
-                    st.rerun() # Rerun to show new tag in list below
+                    st.rerun() 
                 
     st.divider()
     st.subheader("Existing Tags", anchor=False)
     
     if not all_tags:
         st.info("No tags added yet.")
-    
-    # Display tags in columns for a cleaner look
-    num_columns = 4
-    cols = st.columns(num_columns)
-    
-    for i, tag in enumerate(all_tags):
-        col_index = i % num_columns
-        with cols[col_index]:
-            # Use a unique key for each button
-            if st.button(f"Delete: {tag}", key=f"del_tag_{tag}", use_container_width=True):
-                all_tags.remove(tag)
-                if save_tags(all_tags):
-                    st.success(f"Removed tag '{tag}'.")
-                    # Also remove this tag from all cards that have it
-                    df = load_data()
-                    def remove_tag(tags_str):
-                        tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
-                        if tag in tags_list:
-                            tags_list.remove(tag)
-                        return ",".join(tags_list)
-                    
-                    df["Tags"] = df["Tags"].apply(remove_tag)
-                    df.to_csv(DATA_FILE, index=False)
-                    st.rerun()
+        return # Don't show the delete form if there are no tags
+
+    # --- MODIFICATION: A much cleaner UI for deleting ---
+    with st.form("delete_tags_form"):
+        tags_to_delete = st.multiselect(
+            "Select tags to delete",
+            options=all_tags
+        )
+        
+        submitted_delete = st.form_submit_button("Delete Selected Tags", type="primary")
+        
+        if submitted_delete and tags_to_delete:
+            # Create a new list of tags to keep
+            tags_to_keep = [tag for tag in all_tags if tag not in tags_to_delete]
+            
+            if save_tags(tags_to_keep):
+                st.success(f"Deleted tags: {', '.join(tags_to_delete)}")
+                
+                # Also remove these tags from all cards that have them
+                df = load_data()
+                def remove_deleted_tags(tags_str):
+                    tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
+                    # Re-build the list, only keeping non-deleted tags
+                    cleaned_list = [t for t in tags_list if t not in tags_to_delete]
+                    return ",".join(cleaned_list)
+                
+                df["Tags"] = df["Tags"].apply(remove_deleted_tags)
+                df.to_csv(DATA_FILE, index=False)
+                st.rerun()
+        elif submitted_delete:
+            st.warning("Please select at least one tag to delete.")
+    # --- End of modification ---
 
 
 # =============================================================================
@@ -924,10 +915,35 @@ def main():
         object-fit: contain;
     }
     
-    /* MODIFIED: Use st.container(border=True) instead of dividers */
     [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stContainer"] {
         margin-top: 10px;
     }
+
+    /* --- NEW CSS FOR TAGS --- */
+    /* Target only the delete tag buttons */
+    button[title^="Click to delete tag:"] {
+        background-color: #31333F; /* A dark tag color */
+        color: #FAFAFA; /* Light text */
+        border: 1px solid #555555;
+        border-radius: 20px; /* This makes it a "pill" */
+        padding: 4px 12px; /* Small padding */
+        margin: 0;
+        transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+    
+    /* Hover effect for the tag buttons */
+    button[title^="Click to delete tag:"]:hover {
+        background-color: #44444A;
+        border-color: #777777;
+    }
+
+    /* Click effect for the tag buttons */
+    button[title^="Click to delete tag:"]:active {
+        background-color: #2A2B32;
+        border-color: #555555;
+    }
+    /* --- END OF NEW CSS --- */
+
     </style>
     """, unsafe_allow_html=True)
 
