@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import re
 from collections import Counter
+from pandas.tseries.offsets import DateOffset # To add 13 months
 
 # --- Configuration ---
 DATA_FILE = "my_cards.csv"
@@ -17,18 +18,24 @@ STRFTIME_MAP = {
     "MM/DD/YYYY": "%m/%d/%Y",
     "YYYY-MM-DD": "%Y-%m-%d"
 }
+# --- MODIFIED: Added new date columns ---
 DATE_COLUMNS = [
     "Date Applied", "Date Approved", "Date Received Card",
-    "Date Activated Card", "First Charge Date"
+    "Date Activated Card", "First Charge Date", 
+    "Cancellation Date", "Re-apply Date"
 ]
+# --- End of modification ---
+
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_MAP = {f"{i+1:02d}": name for i, name in enumerate(MONTH_NAMES)}
 
+# --- MODIFIED: Added new columns ---
 ALL_COLUMNS = [
     "Bank", "Card Name", "Annual Fee", "Card Expiry (MM/YY)", "Month of Annual Fee",
     "Date Applied", "Date Approved", "Date Received Card",
-    "Date Activated Card", "First Charge Date", "Image Filename", "Sort Order"
+    "Date Activated Card", "First Charge Date", "Image Filename", "Sort Order",
+    "Notes", "Cancellation Date", "Re-apply Date"
 ]
 COLUMN_DTYPES = {
     "Bank": "object", "Card Name": "object", "Annual Fee": "float",
@@ -36,8 +43,10 @@ COLUMN_DTYPES = {
     "Date Applied": "datetime64[ns]", "Date Approved": "datetime64[ns]",
     "Date Received Card": "datetime64[ns]", "Date Activated Card": "datetime64[ns]",
     "First Charge Date": "datetime64[ns]", "Image Filename": "object",
-    "Sort Order": "int"
+    "Sort Order": "int",
+    "Notes": "object", "Cancellation Date": "datetime64[ns]", "Re-apply Date": "datetime64[ns]"
 }
+# --- End of modification ---
 
 # --- Setup: Create data file if it doesn't exist ---
 if not os.path.exists(DATA_FILE):
@@ -66,28 +75,49 @@ if 'show_sort_form' not in st.session_state:
     st.session_state.show_sort_form = False
 if 'duplicate_sort_numbers' not in st.session_state:
     st.session_state.duplicate_sort_numbers = []
-# --- MODIFIED: Added state for details page ---
 if 'show_details_page' not in st.session_state:
     st.session_state.show_details_page = False
 if 'card_to_view' not in st.session_state:
     st.session_state.card_to_view = None
-# --- End of modification ---
 
 
 # --- Helper Functions ---
+# --- MODIFIED: Updated load_data to handle missing columns ---
 def load_data():
     """Loads the card data from the CSV file."""
     try:
-        df = pd.read_csv(DATA_FILE, parse_dates=DATE_COLUMNS)
-        if "Sort Order" not in df.columns:
-            df["Sort Order"] = range(1, len(df) + 1)
-        df["Sort Order"] = pd.to_numeric(df["Sort Order"], errors='coerce').fillna(99).astype(int)
-        df["Sort Order"] = df["Sort Order"].apply(lambda x: 99 if x < 1 else x)
-        return df
+        # Step 1: Read the CSV *without* parsing dates initially.
+        df = pd.read_csv(DATA_FILE)
+
     except pd.errors.EmptyDataError:
+        # File is totally empty, create a new one with correct types
         df = pd.DataFrame(columns=ALL_COLUMNS)
         df = df.astype(COLUMN_DTYPES)
         return df
+
+    # Step 2: Now that we have a DataFrame, check for missing columns.
+    # This handles "migration" from an old CSV.
+    if "Sort Order" not in df.columns:
+        df["Sort Order"] = range(1, len(df) + 1)
+    if "Notes" not in df.columns:
+        df["Notes"] = ""
+    if "Cancellation Date" not in df.columns:
+        df["Cancellation Date"] = pd.NaT # Add the column with Null dates
+    if "Re-apply Date" not in df.columns:
+        df["Re-apply Date"] = pd.NaT # Add the column with Null dates
+        
+    # Step 3: Now that all columns are guaranteed to exist,
+    # *manually* parse/coerce all date columns.
+    for col in DATE_COLUMNS:
+        df[col] = pd.to_datetime(df[col], errors='coerce')
+
+    # Step 4: Ensure other types are correct too.
+    df["Sort Order"] = pd.to_numeric(df["Sort Order"], errors='coerce').fillna(99).astype(int)
+    df["Sort Order"] = df["Sort Order"].apply(lambda x: 99 if x < 1 else x)
+    df["Notes"] = df["Notes"].astype(str).fillna("")
+
+    return df
+# --- End of modification ---
 
 def prettify_bank_name(bank_name):
     """Converts file-safe bank names to display-friendly names."""
@@ -168,6 +198,11 @@ def show_add_card_form(card_mapping):
             expiry_yy = st.text_input("YY*", placeholder="27", max_chars=2, help="e.g., 27 for 2027")
         annual_fee = st.number_input("Annual Fee ($)", min_value=0.0, step=1.00, format="%.2f")
 
+        # --- MODIFIED: Added Notes field ---
+        st.subheader("Notes", anchor=False)
+        notes = st.text_area("Add any notes for this card (e.g., waiver info, benefits).")
+        # --- End of modification ---
+
         st.write("---")
         st.subheader("Optional Dates", anchor=False)
         st.caption("You can leave these blank. To clear a set date, click the 'x' in the date widget.")
@@ -215,6 +250,7 @@ def show_add_card_form(card_mapping):
         else:
             new_sort_order = int(max_sort + 1)
 
+        # --- MODIFIED: Added new fields to save ---
         new_card = {
             "Bank": bank, "Card Name": card_name, "Annual Fee": annual_fee,
             "Card Expiry (MM/YY)": card_expiry_mm_yy, "Month of Annual Fee": fee_month,
@@ -224,8 +260,12 @@ def show_add_card_form(card_mapping):
             "Date Received Card": pd.to_datetime(received_date),
             "Date Activated Card": pd.to_datetime(activated_date),
             "First Charge Date": pd.to_datetime(first_charge_date),
-            "Sort Order": new_sort_order
+            "Sort Order": new_sort_order,
+            "Notes": notes,
+            "Cancellation Date": pd.NaT,
+            "Re-apply Date": pd.NaT
         }
+        # --- End of modification ---
 
         new_df = pd.DataFrame([new_card])
         df = pd.concat([df, new_df], ignore_index=True)
@@ -267,6 +307,11 @@ def show_edit_form():
 
         annual_fee = st.number_input("Annual Fee ($)", min_value=0.0, step=1.00, format="%.2f", value=card_data["Annual Fee"])
         
+        # --- MODIFIED: Added Notes field ---
+        st.subheader("Notes", anchor=False)
+        notes = st.text_area("Card notes", value=card_data.get("Notes", "")) # .get() for safety
+        # --- End of modification ---
+        
         st.write("---")
         st.subheader("Edit Optional Dates", anchor=False)
         def get_date(date_val):
@@ -277,6 +322,9 @@ def show_edit_form():
         received_date = st.date_input("Date Received Card", value=get_date(card_data["Date Received Card"]), format=st.session_state.date_format)
         activated_date = st.date_input("Date Activated Card", value=get_date(card_data["Date Activated Card"]), format=st.session_state.date_format)
         first_charge_date = st.date_input("First Charge Date", value=get_date(card_data["First Charge Date"]), format=st.session_state.date_format)
+        
+        st.caption("Cancellation and Re-apply dates are handled via the 'Cancel Card' button on the dashboard.")
+
 
         col1, col2 = st.columns([1, 1])
         with col1:
@@ -295,6 +343,7 @@ def show_edit_form():
         card_expiry_mm_yy = f"{expiry_mm}/{expiry_yy}"
         fee_month = MONTH_MAP.get(expiry_mm)
 
+        # --- MODIFIED: Added Notes to save logic ---
         all_cards_df.loc[card_index, "Bank"] = bank
         all_cards_df.loc[card_index, "Card Name"] = card_name
         all_cards_df.loc[card_index, "Annual Fee"] = annual_fee
@@ -305,6 +354,8 @@ def show_edit_form():
         all_cards_df.loc[card_index, "Date Received Card"] = pd.to_datetime(received_date)
         all_cards_df.loc[card_index, "Date Activated Card"] = pd.to_datetime(activated_date)
         all_cards_df.loc[card_index, "First Charge Date"] = pd.to_datetime(first_charge_date)
+        all_cards_df.loc[card_index, "Notes"] = notes
+        # --- End of modification ---
 
         all_cards_df.to_csv(DATA_FILE, index=False)
         st.success(f"Successfully updated {bank} {card_name}!"); 
@@ -318,21 +369,21 @@ def show_dashboard(all_cards_df):
     if st.sidebar.button("Add New Card"):
         st.session_state.show_add_form = True; st.rerun()
     
-    # --- MODIFIED: Added Data Export Button ---
     st.sidebar.divider()
+    
+    show_cancelled = st.sidebar.checkbox("Show Cancelled Cards", value=True)
+    
     try:
-        # Read the raw CSV data to pass to the button
-        with open(DATA_FILE, "rb") as fp:
-            st.sidebar.download_button(
-                label="Export Card Data (CSV)",
-                data=fp,
-                file_name="my_cards_backup.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-    except FileNotFoundError:
-        st.sidebar.error("No card data file found.")
-    # --- End of modification ---
+        csv_data = all_cards_df.to_csv(index=False).encode('utf-8')
+        st.sidebar.download_button(
+            label="Export Card Data (CSV)",
+            data=csv_data,
+            file_name="my_cards_backup.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    except Exception as e:
+        st.sidebar.error(f"Error exporting data: {e}")
 
     st.title("💳 Credit Card Dashboard", anchor=False)
 
@@ -342,48 +393,54 @@ def show_dashboard(all_cards_df):
     current_month_name = MONTH_NAMES[current_month_index]
     next_month_name = MONTH_NAMES[next_month_index]
 
+    if show_cancelled:
+        cards_to_display_df = all_cards_df.copy()
+        st.info("Showing all cards, including cancelled.")
+    else:
+        cards_to_display_df = all_cards_df[pd.isna(all_cards_df['Cancellation Date'])].copy()
+
     st.header("Summary", anchor=False)
     
     def get_month_index(month_name):
         try: return MONTH_NAMES.index(month_name)
         except (ValueError, TypeError): return -1
             
-    all_cards_df['due_month_index'] = all_cards_df['Month of Annual Fee'].apply(get_month_index)
-    cards_due_this_year_df = all_cards_df[all_cards_df['due_month_index'] >= current_month_index]
+    cards_to_display_df['due_month_index'] = cards_to_display_df['Month of Annual Fee'].apply(get_month_index)
+    cards_due_this_year_df = cards_to_display_df[cards_to_display_df['due_month_index'] >= current_month_index]
     count_due_this_year = len(cards_due_this_year_df)
     amount_due_this_year = cards_due_this_year_df['Annual Fee'].sum()
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Cards", len(all_cards_df))
-    col2.metric("Total Annual Fees", f"${all_cards_df['Annual Fee'].sum():,.2f}")
+    col1.metric("Total Cards (Active)" if not show_cancelled else "Total Cards (All)", len(cards_to_display_df))
+    col2.metric("Total Annual Fees", f"${cards_to_display_df['Annual Fee'].sum():,.2f}")
     col3.metric("Fees Due This Year (#)", count_due_this_year)
     col4.metric("Fees Due This Year ($)", f"${amount_due_this_year:,.2f}")
     
     st.divider()
 
     st.header("Annual Fee Notifications", anchor=False)
-    cards_due_this_month = all_cards_df[all_cards_df["Month of Annual Fee"] == current_month_name]
-    cards_due_next_month = all_cards_df[all_cards_df["Month of Annual Fee"] == next_month_name]
+    cards_due_this_month = cards_to_display_df[cards_to_display_df["Month of Annual Fee"] == current_month_name]
+    cards_due_next_month = cards_to_display_df[cards_to_display_df["Month of Annual Fee"] == next_month_name]
     st.subheader(f"Due This Month ({current_month_name})", anchor=False)
     if cards_due_this_month.empty: st.write("No annual fees due this month.")
     else:
-        for _, card in cards_due_this_month.iterrows():
-            fee = card['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
-            st.warning(f"**{card['Bank']} {card['Card Name']}**: {fee_text}")
+        for _, card_data in cards_due_this_month.iterrows():
+            fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
+            st.warning(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
     st.subheader(f"Due Next Month ({next_month_name})", anchor=False)
     if cards_due_next_month.empty: st.write("No annual fees due next month.")
     else:
-        for _, card in cards_due_next_month.iterrows():
-            fee = card['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
-            st.info(f"**{card['Bank']} {card['Card Name']}**: {fee_text}")
+        for _, card_data in cards_due_next_month.iterrows():
+            fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
+            st.info(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
 
     st.header("All My Cards", anchor=False)
     
-    all_cards_df['due_sort_key'] = (all_cards_df['due_month_index'] - current_month_index + 12) % 12
+    cards_to_display_df['due_sort_key'] = (cards_to_display_df['due_month_index'] - current_month_index + 12) % 12
 
     f_col1, f_col2 = st.columns(2)
     with f_col1:
-        bank_options = sorted(all_cards_df['Bank'].unique())
+        bank_options = sorted(cards_to_display_df['Bank'].unique())
         selected_banks = st.multiselect("Filter by Bank", options=bank_options)
     with f_col2:
         sort_options = {
@@ -400,89 +457,133 @@ def show_dashboard(all_cards_df):
                 st.session_state.duplicate_sort_numbers = [] 
                 st.rerun()
     
-    cards_to_show_df = all_cards_df.copy()
+    cards_to_show_df_sorted = cards_to_display_df.copy()
     if selected_banks:
-        cards_to_show_df = cards_to_show_df[cards_to_show_df['Bank'].isin(selected_banks)]
+        cards_to_show_df_sorted = cards_to_show_df_sorted[cards_to_show_df_sorted['Bank'].isin(selected_banks)]
 
     sort_logic = sort_options[selected_sort_key]
     if sort_logic == "Annual Fee_desc":
-        cards_to_show_df = cards_to_show_df.sort_values(by="Annual Fee", ascending=False)
+        cards_to_show_df_sorted = cards_to_show_df_sorted.sort_values(by="Annual Fee", ascending=False)
     elif sort_logic == "Annual Fee_asc":
-        cards_to_show_df = cards_to_show_df.sort_values(by="Annual Fee", ascending=True)
+        cards_to_show_df_sorted = cards_to_show_df_sorted.sort_values(by="Annual Fee", ascending=True)
     elif sort_logic == "due_sort_key":
-        cards_to_show_df = cards_to_show_df.sort_values(by="due_sort_key", ascending=True)
+        cards_to_show_df_sorted = cards_to_show_df_sorted.sort_values(by="due_sort_key", ascending=True)
     else: 
-        cards_to_show_df = cards_to_show_df.sort_values(by="Sort Order", ascending=True)
+        cards_to_show_df_sorted = cards_to_show_df_sorted.sort_values(by="Sort Order", ascending=True)
 
     strftime_code = STRFTIME_MAP[st.session_state.date_format]
-    if cards_to_show_df.empty:
+    if cards_to_show_df_sorted.empty:
         st.info("No cards match your current filters.")
 
-    for index, card in cards_to_show_df.iterrows():
+    for index, card_row in cards_to_show_df_sorted.iterrows():
         st.divider()
         col1, col2 = st.columns([1, 3])
 
         with col1:
-            image_path = os.path.join(IMAGE_DIR, str(card["Image Filename"]))
+            image_path = os.path.join(IMAGE_DIR, str(card_row["Image Filename"]))
             if not os.path.exists(image_path): image_path = os.path.join(IMAGE_DIR, DEFAULT_IMAGE)
             if os.path.exists(image_path): st.image(image_path)
             else: st.caption("No Image")
 
         with col2:
-            st.subheader(f"{card['Bank']} {card['Card Name']}", anchor=False)
-            st.metric(label="Annual Fee", value=f"${card['Annual Fee']:.2f}")
-
-            due_month_name = card['Month of Annual Fee']
-            due_month_index = card['due_month_index'] 
-
-            if due_month_index == current_month_index:
-                st.error(f"❗ **Due this month** ({due_month_name})")
-            elif due_month_index == next_month_index:
-                st.warning(f"⚠️ **Due next month** ({due_month_name})")
-            elif due_month_index != -1:
-                st.success(f"✅ Due in {due_month_name}")
+            st.subheader(f"{card_row['Bank']} {card_row['Card Name']}", anchor=False)
+            
+            is_cancelled = pd.notna(card_row["Cancellation Date"])
+            if is_cancelled:
+                st.error("Status: Cancelled")
             else:
-                st.info(f"Due in {due_month_name}")
+                st.metric(label="Annual Fee", value=f"${card_row['Annual Fee']:.2f}")
+
+            due_month_name = card_row['Month of Annual Fee']
+            due_month_index = card_row['due_month_index'] 
+            
+            if not is_cancelled:
+                if due_month_index == current_month_index:
+                    st.error(f"❗ **Due this month** ({due_month_name})")
+                elif due_month_index == next_month_index:
+                    st.warning(f"⚠️ **Due next month** ({due_month_name})")
+                elif due_month_index != -1:
+                    st.success(f"✅ Due in {due_month_name}")
+                else:
+                    st.info(f"Due in {due_month_name}")
 
             st.write("") 
-            # --- MODIFIED: Added 4th column for "Details" button ---
             b_col1, b_col2, b_col3, b_col4 = st.columns([1, 1, 1, 1])
             
             with b_col1:
                 if st.button("Details", key=f"details_{index}", use_container_width=True):
-                    st.session_state.card_to_view = index
-                    st.session_state.show_details_page = True
-                    st.session_state.card_to_edit = None
-                    st.session_state.card_to_delete = None
-                    st.rerun()
+                    st.session_state.card_to_view = index; st.session_state.show_details_page = True; st.session_state.card_to_edit = None; st.session_state.card_to_delete = None; st.rerun()
 
             with b_col2:
                 if st.button("Edit", key=f"edit_{index}", use_container_width=True):
                     st.session_state.card_to_edit = index; st.session_state.show_edit_form = True; st.session_state.card_to_delete = None; st.rerun()
             
             with b_col3:
-            # --- End of modification ---
-                if st.session_state.card_to_delete == index:
-                    if st.button("Confirm Delete", key=f"confirm_del_{index}", type="primary", use_container_width=True):
+                if is_cancelled:
+                    if st.button("Re-activate", key=f"reactivate_{index}", use_container_width=True):
+                        df = load_data()
+                        df.loc[index, "Cancellation Date"] = pd.NaT
+                        df.loc[index, "Re-apply Date"] = pd.NaT
+                        df.to_csv(DATA_FILE, index=False)
+                        st.success(f"Re-activated {card_row['Bank']} {card_row['Card Name']}.")
+                        st.rerun()
+                else:
+                    if st.session_state.card_to_delete == index:
+                        if st.button("Confirm Cancel", key=f"confirm_cancel_{index}", type="primary", use_container_width=True):
+                            df = load_data()
+                            cancel_date = pd.to_datetime('today')
+                            reapply_date = cancel_date + DateOffset(months=13)
+                            df.loc[index, "Cancellation Date"] = cancel_date
+                            df.loc[index, "Re-apply Date"] = reapply_date
+                            df.to_csv(DATA_FILE, index=False)
+                            st.session_state.card_to_delete = None
+                            st.success(f"Cancelled {card_row['Bank']} {card_row['Card Name']}.")
+                            st.rerun()
+                        if st.button("Cancel Action", key=f"cancel_cancel_{index}", use_container_width=True):
+                            st.session_state.card_to_delete = None; st.rerun()
+                    else:
+                        if st.button("Cancel Card", key=f"cancel_{index}", use_container_width=True):
+                            st.session_state.card_to_delete = index; st.session_state.card_to_edit = None; st.rerun()
+            
+            with b_col4:
+                if st.session_state.get(f"confirm_permanent_delete_{index}", False):
+                    # --- MODIFIED: Changed type="secondary" to type="primary" ---
+                    if st.button("CONFIRM DELETE", key=f"confirm_delete_permanent_{index}", type="primary", use_container_width=True):
+                    # --- End of modification ---
                         df = load_data()
                         df = df.drop(index).reset_index(drop=True)
                         df.to_csv(DATA_FILE, index=False)
-                        st.session_state.card_to_delete = None
-                        st.success(f"Removed {card['Bank']} {card['Card Name']}.")
+                        st.session_state[f"confirm_permanent_delete_{index}"] = False 
+                        st.success(f"Permanently deleted {card_row['Bank']} {card_row['Card Name']}.")
                         st.rerun()
-                    if st.button("Cancel", key=f"cancel_del_{index}", use_container_width=True):
-                        st.session_state.card_to_delete = None; st.rerun()
+                    if st.button("No, Keep Card", key=f"cancel_delete_permanent_{index}", use_container_width=True):
+                        st.session_state[f"confirm_permanent_delete_{index}"] = False 
+                        st.rerun()
                 else:
-                    if st.button("Delete", key=f"delete_{index}", use_container_width=True):
-                        st.session_state.card_to_delete = index; st.session_state.card_to_edit = None; st.rerun()
+                    if st.button("Delete Permanently", key=f"delete_permanent_{index}", use_container_width=True):
+                        st.session_state[f"confirm_permanent_delete_{index}"] = True 
+                        st.session_state.card_to_edit = None
+                        st.session_state.card_to_delete = None 
+                        st.rerun()
 
             with st.expander("Show All Dates and Details"):
-                details_df = card.to_frame().T.drop(columns=[
+                notes = card_row.get("Notes", "")
+                if notes and pd.notna(notes):
+                    st.markdown("**Notes:**")
+                    st.markdown(notes)
+                
+                if is_cancelled:
+                    c_col1, c_col2 = st.columns(2)
+                    c_col1.metric("Cancelled On", pd.to_datetime(card_row["Cancellation Date"]).strftime("%d %b %Y"))
+                    c_col2.metric("Re-apply After", pd.to_datetime(card_row["Re-apply Date"]).strftime("%d %b %Y"))
+
+                details_df = card_row.to_frame().T.drop(columns=[
                     "Bank", "Card Name", "Annual Fee", "Month of Annual Fee", 
-                    "Image Filename", "due_month_index", "due_sort_key", "Sort Order"
+                    "Image Filename", "due_month_index", "due_sort_key", "Sort Order",
+                    "Notes", "Cancellation Date", "Re-apply Date"
                 ])
                 for col in DATE_COLUMNS:
-                    if col in details_df.columns:
+                    if col in details_df.columns and col not in ["Cancellation Date", "Re-apply Date"]:
                         details_df[col] = pd.to_datetime(details_df[col]).dt.strftime(strftime_code).replace('NaT', 'N/A')
                 st.dataframe(details_df, hide_index=True)
 
@@ -493,13 +594,17 @@ def show_sort_order_form():
     st.title("Edit Manual Card Order", anchor=False)
     st.write("Change the numbers to reorder your cards. Lower numbers appear first. Click 'Save Order' when done.")
     
-    all_cards_df = load_data().sort_values(by="Sort Order")
+    # --- MODIFIED: Only show ACTIVE cards in the sort list ---
+    all_cards_df = load_data()
+    active_cards_df = all_cards_df[pd.isna(all_cards_df['Cancellation Date'])].sort_values(by="Sort Order")
+    st.info("Only active cards are shown. Cancelled cards cannot be re-ordered.")
+    # --- End of modification ---
     
     with st.form("sort_order_form"):
         if st.session_state.duplicate_sort_numbers:
              st.error(f"Found duplicate numbers: {', '.join(map(str, st.session_state.duplicate_sort_numbers))}. Please fix and save again.")
         
-        for index, card in all_cards_df.iterrows():
+        for index, card in active_cards_df.iterrows():
             col1, col2 = st.columns([1, 3])
             default_val = st.session_state.get(f"sort_{index}", int(card["Sort Order"]))
             
@@ -528,7 +633,7 @@ def show_sort_order_form():
 
     if submitted:
         all_new_orders = []
-        for index in all_cards_df.index:
+        for index in active_cards_df.index: # Only check active cards
             all_new_orders.append(st.session_state[f"sort_{index}"])
         
         duplicates = [item for item, count in Counter(all_new_orders).items() if count > 1]
@@ -539,7 +644,7 @@ def show_sort_order_form():
         else:
             st.session_state.duplicate_sort_numbers = [] 
             df_to_save = load_data()
-            for index in df_to_save.index:
+            for index in active_cards_df.index: # Only save active cards
                 new_order = st.session_state[f"sort_{index}"]
                 df_to_save.loc[index, "Sort Order"] = new_order
             
@@ -549,7 +654,7 @@ def show_sort_order_form():
             st.rerun()
 
 # =============================================================================
-# 5. NEW: "Card Details" Page
+# 5. "Card Details" Page
 # =============================================================================
 def show_details_page():
     st.title("Card Details", anchor=False)
@@ -572,7 +677,6 @@ def show_details_page():
     
     st.divider()
 
-    # --- Display Card Info ---
     col1, col2 = st.columns([1, 2])
     with col1:
         image_path = os.path.join(IMAGE_DIR, str(card["Image Filename"]))
@@ -589,10 +693,17 @@ def show_details_page():
         st.markdown(f"**Fee Month:** {card['Month of Annual Fee']}")
         st.markdown(f"**Card Expiry:** {card['Card Expiry (MM/YY)']}")
 
+    # --- MODIFIED: Show Notes ---
+    notes = card.get("Notes", "")
+    if notes and pd.notna(notes):
+        st.divider()
+        st.subheader("Notes", anchor=False)
+        st.markdown(notes)
+    # --- End of modification ---
+
     st.divider()
     st.subheader("Card Dates", anchor=False)
     
-    # Format dates for display
     strftime_code = STRFTIME_MAP[st.session_state.date_format]
     
     def format_date_display(date_val):
@@ -600,7 +711,6 @@ def show_details_page():
             return "N/A"
         return pd.to_datetime(date_val).strftime(strftime_code)
 
-    # Display in columns
     d_col1, d_col2, d_col3 = st.columns(3)
     with d_col1:
         st.metric("Date Applied", format_date_display(card["Date Applied"]))
@@ -610,6 +720,15 @@ def show_details_page():
         st.metric("Date Activated", format_date_display(card["Date Activated Card"]))
     with d_col3:
         st.metric("First Charge Date", format_date_display(card["First Charge Date"]))
+
+    # --- MODIFIED: Show cancellation dates if they exist ---
+    if pd.notna(card["Cancellation Date"]):
+        st.divider()
+        st.subheader("Cancellation Info", anchor=False)
+        c_col1, c_col2 = st.columns(2)
+        c_col1.metric("Cancelled On", format_date_display(card["Cancellation Date"]))
+        c_col2.metric("Re-apply After", format_date_display(card["Re-apply Date"]))
+    # --- End of modification ---
 
 
 # =============================================================================
@@ -635,13 +754,17 @@ def main():
         /* Fit the image within the box, padding as needed */
         object-fit: contain;
     }
+    
+    /* MODIFIED: Use st.container(border=True) instead of dividers */
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stContainer"] {
+        margin-top: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
     all_cards_df = load_data()
     card_mapping = get_card_mapping()
 
-    # --- MODIFIED: Added router logic for details and sort pages ---
     if st.session_state.show_add_form:
         show_add_card_form(card_mapping)
     elif st.session_state.show_edit_form:
@@ -650,7 +773,6 @@ def main():
         show_sort_order_form()
     elif st.session_state.show_details_page:
         show_details_page()
-    # --- End of modification ---
     elif all_cards_df.empty:
         st.title("Welcome to your Credit Card Tracker!", anchor=False)
         col1, col2, col3 = st.columns([1, 1, 1])
