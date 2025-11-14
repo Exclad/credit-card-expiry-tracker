@@ -58,6 +58,10 @@ if 'add_method' not in st.session_state:
     st.session_state.add_method = "Choose from list"
 if 'card_to_add_selection' not in st.session_state:
     st.session_state.card_to_add_selection = None
+# --- MODIFIED: Added new state for delete confirmation ---
+if 'card_to_delete' not in st.session_state:
+    st.session_state.card_to_delete = None
+# --- End of modification ---
 
 
 # --- Helper Functions ---
@@ -131,13 +135,11 @@ def show_add_card_form(card_mapping):
                 st.image(os.path.join(IMAGE_DIR, image_filename))
 
     else:
-        # --- MODIFIED: Added st.image() to show the default image ---
         st.info(f"Your card will be saved with the default image ({DEFAULT_IMAGE}).")
         default_image_path = os.path.join(IMAGE_DIR, DEFAULT_IMAGE)
         if os.path.exists(default_image_path):
             st.image(default_image_path)
         image_filename = DEFAULT_IMAGE
-        # --- End of modification ---
 
     with st.form("new_card_form"):
 
@@ -382,6 +384,7 @@ def show_dashboard(all_cards_df):
             image_path = os.path.join(IMAGE_DIR, str(card["Image Filename"]))
             if not os.path.exists(image_path):
                 image_path = os.path.join(IMAGE_DIR, DEFAULT_IMAGE)
+            # --- MODIFIED: Fixed the typo 'os..path' ---
             if os.path.exists(image_path):
                 st.image(image_path)
             else:
@@ -407,10 +410,38 @@ def show_dashboard(all_cards_df):
             else:
                 st.info(f"Due in {due_month_name}")
 
-            if st.button("Edit Card", key=f"edit_{index}"):
-                st.session_state.card_to_edit = index
-                st.session_state.show_edit_form = True
-                st.rerun()
+            # --- MODIFIED: Added button columns and delete logic ---
+            st.write("") # Add a little space
+            b_col1, b_col2, b_col3 = st.columns([1, 1, 2]) # 3rd col is for spacing
+            
+            with b_col1:
+                if st.button("Edit Card", key=f"edit_{index}", use_container_width=True):
+                    st.session_state.card_to_edit = index
+                    st.session_state.show_edit_form = True
+                    st.session_state.card_to_delete = None # Clear delete state
+                    st.rerun()
+            
+            with b_col2:
+                # Check if we are in confirmation state for *this* card
+                if st.session_state.card_to_delete == index:
+                    # Show confirmation buttons
+                    if st.button("Confirm Delete", key=f"confirm_del_{index}", type="primary", use_container_width=True):
+                        df = load_data()
+                        df = df.drop(index).reset_index(drop=True)
+                        df.to_csv(DATA_FILE, index=False)
+                        st.session_state.card_to_delete = None
+                        st.success(f"Removed {card['Bank']} {card['Card Name']}.")
+                        st.rerun()
+                    if st.button("Cancel", key=f"cancel_del_{index}", use_container_width=True):
+                        st.session_state.card_to_delete = None
+                        st.rerun()
+                else:
+                    # Show the normal delete button
+                    if st.button("Delete Card", key=f"delete_{index}", use_container_width=True):
+                        st.session_state.card_to_delete = index
+                        st.session_state.card_to_edit = None # Clear edit state
+                        st.rerun()
+            # --- End of modification ---
 
             with st.expander("Show All Dates and Details"):
                 details_df = card.to_frame().T.drop(columns=[
@@ -423,7 +454,7 @@ def show_dashboard(all_cards_df):
 
                 st.dataframe(details_df, hide_index=True)
 
-# =================================_===========================================
+# =============================================================================
 # MAIN APP "ROUTER"
 # =============================================================================
 def main():
