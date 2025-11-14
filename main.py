@@ -472,13 +472,13 @@ def show_dashboard(all_cards_df):
     else:
         for _, card_data in cards_due_this_month.iterrows():
             fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
-            st.warning(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
+            st.error(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
     st.subheader(f"Due Next Month ({next_month_name})", anchor=False)
     if cards_due_next_month.empty: st.write("No annual fees due next month.")
     else:
         for _, card_data in cards_due_next_month.iterrows():
             fee = card_data['Annual Fee']; fee_text = f"The fee is **${fee:.2f}**." if fee > 0 else "Fee is $0, but please verify."
-            st.info(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
+            st.warning(f"**{card_data['Bank']} {card_data['Card Name']}**: {fee_text}")
     
     st.divider()
 
@@ -561,6 +561,13 @@ def show_dashboard(all_cards_df):
     if cards_to_show_df_sorted.empty:
         st.info("No cards match your current filters.")
 
+    # --- MODIFICATION: Added helper function for use in the loop ---
+    def format_date_display(date_val):
+        if pd.isna(date_val):
+            return "N/A"
+        return pd.to_datetime(date_val).strftime(strftime_code)
+    # --- End of modification ---
+
     for index, card_row in cards_to_show_df_sorted.iterrows():
         st.divider()
         col1, col2 = st.columns([1, 3])
@@ -576,10 +583,8 @@ def show_dashboard(all_cards_df):
             
             is_cancelled = pd.notna(card_row["Cancellation Date"])
             
-            # --- MODIFICATION: Using st.metric for the large text display ---
             if is_cancelled:
                 st.error("Status: Cancelled")
-                # Use columns and metrics for the large text format
                 c_col1, c_col2 = st.columns(2)
                 with c_col1:
                     st.metric("Cancelled On", pd.to_datetime(card_row["Cancellation Date"]).strftime("%d %b %Y"))
@@ -587,7 +592,6 @@ def show_dashboard(all_cards_df):
                     st.metric("Re-apply After", pd.to_datetime(card_row["Re-apply Date"]).strftime("%d %b %Y"))
             else:
                 st.metric(label="Annual Fee", value=f"${card_row['Annual Fee']:.2f}")
-            # --- End of modification ---
 
             due_month_name = card_row['Month of Annual Fee']
             due_month_index = card_row['due_month_index'] 
@@ -598,7 +602,7 @@ def show_dashboard(all_cards_df):
                 elif due_month_index == next_month_index:
                     st.warning(f"⚠️ **Due next month** ({due_month_name})")
                 elif due_month_index != -1:
-                    st.success(f"✅ Due in {due_month_name}")
+                    st.info(f"✅ Due in {due_month_name}")
                 else:
                     st.info(f"Due in {due_month_name}")
             
@@ -668,17 +672,20 @@ def show_dashboard(all_cards_df):
                         st.session_state.card_to_delete = None 
                         st.rerun()
 
+            # --- MODIFICATION: Replaced dataframe with st.metric layout ---
             with st.expander("Show All Dates and Details"):
-                details_df = card_row.to_frame().T.drop(columns=[
-                    "Bank", "Card Name", "Annual Fee", "Month of Annual Fee", 
-                    "Image Filename", "due_month_index", "due_sort_key", "Sort Order",
-                    "Notes", "Cancellation Date", "Re-apply Date", "Tags"
-                ])
+                st.markdown(f"**Card Expiry:** {card_row['Card Expiry (MM/YY)']}")
                 
-                for col in DATE_COLUMNS:
-                    if col in details_df.columns and col not in ["Cancellation Date", "Re-apply Date"]:
-                        details_df[col] = pd.to_datetime(details_df[col]).dt.strftime(strftime_code).replace('NaT', 'N/A')
-                st.dataframe(details_df, hide_index=True)
+                d_col1, d_col2, d_col3 = st.columns(3)
+                with d_col1:
+                    st.metric("Date Applied", format_date_display(card_row["Date Applied"]))
+                    st.metric("Date Approved", format_date_display(card_row["Date Approved"]))
+                with d_col2:
+                    st.metric("Date Received", format_date_display(card_row["Date Received Card"]))
+                    st.metric("Date Activated", format_date_display(card_row["Date Activated Card"]))
+                with d_col3:
+                    st.metric("First Charge Date", format_date_display(card_row["First Charge Date"]))
+            # --- End of modification ---
 
 # =============================================================================
 # 4. "Edit Sort Order" Page
