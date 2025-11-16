@@ -480,7 +480,11 @@ def show_add_card_form(card_mapping):
             "Min Spend Deadline": pd.to_datetime(min_spend_deadline),
             "Bonus Status": bonus_status,
             "Last 4 Digits": last_4_digits,
-            "Current Spend": 0.0 # New cards start at 0 spend
+            "Current Spend": 0.0, # New cards start at 0 spend
+            "FeeWaivedCount": 0,
+            "FeePaidCount": 0,
+            "LastFeeActionYear": 0,
+            "LastFeeAction": ""
             # FeeWaivedCount, FeePaidCount, etc. will be filled with
             # their default values (0, 0, 0, "") by the .astype() call below
         }
