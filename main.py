@@ -835,7 +835,6 @@ def show_dashboard(all_cards_df, show_cancelled):
                         new_spend = st.number_input(
                             "Update Total Spend ($)",
                             min_value=0.0,
-                            max_value=float(min_spend * 1.5), # Set a reasonable max
                             value=float(current_spend),
                             step=50.0,
                             label_visibility="collapsed"
