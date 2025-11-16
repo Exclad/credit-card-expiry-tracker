@@ -36,7 +36,6 @@ MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_MAP = {f"{i+1:02d}": name for i, name in enumerate(MONTH_NAMES)}
 
-# --- MODIFICATION: Added LastFeeAction ---
 # This is the master list of *all* columns in the DataFrame.
 # It defines the "schema" for our CSV file.
 ALL_COLUMNS = [
@@ -47,7 +46,7 @@ ALL_COLUMNS = [
     "Bonus Offer", "Min Spend", "Min Spend Deadline", "Bonus Status",
     "Last 4 Digits", "Current Spend",
     "FeeWaivedCount", "FeePaidCount", "LastFeeActionYear",
-    "LastFeeAction"  # <-- NEW: Tracks if the last action was 'Waived' or 'Paid'
+    "LastFeeAction"  # Tracks if the last action was 'Waived' or 'Paid'
 ]
 # This dictionary defines the data type (dtype) for each column.
 # This is *crucial* for preventing errors when loading/saving data,
@@ -70,9 +69,8 @@ COLUMN_DTYPES = {
     "FeeWaivedCount": "int",
     "FeePaidCount": "int",
     "LastFeeActionYear": "int",
-    "LastFeeAction": "object" # <-- NEW: Set as 'object' (string)
+    "LastFeeAction": "object" # Set as 'object' (string)
 }
-# --- End of modification ---
 
 # --- Setup: Create data file and directories if they don't exist ---
 # This is a one-time setup that runs when the app starts.
@@ -121,7 +119,7 @@ if 'card_to_add_selection' not in st.session_state:
 if 'duplicate_sort_numbers' not in st.session_state:
     st.session_state.duplicate_sort_numbers = [] # Used to show errors on the Sort page
 
-# --- NEW: Session state for live image preview ---
+# Session state for live image preview
 # This is a common Streamlit pattern. We need to store the uploaded image
 # in session state *before* the form is submitted to show a live preview.
 if 'image_uploader_key' not in st.session_state:
@@ -129,7 +127,6 @@ if 'image_uploader_key' not in st.session_state:
     st.session_state.image_uploader_key = str(datetime.now().timestamp())
 if 'uploaded_image_preview' not in st.session_state:
     st.session_state.uploaded_image_preview = None # Stores the UploadedFile object
-# --- End of new ---
 
 # =============================================================================
 #  Helper Functions
@@ -185,10 +182,8 @@ def load_data():
         df["FeePaidCount"] = 0
     if "LastFeeActionYear" not in df.columns:
         df["LastFeeActionYear"] = 0
-    # --- NEW: Add LastFeeAction column if missing ---
     if "LastFeeAction" not in df.columns:
         df["LastFeeAction"] = ""
-    # --- End of new ---
         
     # --- Type Coercion ---
     # This block cleans the data loaded from the CSV.
@@ -210,9 +205,7 @@ def load_data():
     df["FeeWaivedCount"] = pd.to_numeric(df["FeeWaivedCount"], errors='coerce').fillna(0).astype(int)
     df["FeePaidCount"] = pd.to_numeric(df["FeePaidCount"], errors='coerce').fillna(0).astype(int)
     df["LastFeeActionYear"] = pd.to_numeric(df["LastFeeActionYear"], errors='coerce').fillna(0).astype(int)
-    # --- NEW: Ensure LastFeeAction is string ---
     df["LastFeeAction"] = df["LastFeeAction"].fillna("").astype(str)
-    # --- End of new ---
 
     return df
 
@@ -495,13 +488,11 @@ def show_add_card_form(card_mapping):
         # 6. Save to DataFrame
         new_df = pd.DataFrame([new_card])
         
-        # --- MODIFICATION: Fix FutureWarning ---
         # This is the *most important* step for saving.
         # We enforce the master COLUMN_DTYPES schema on the *new row*.
         # This ensures that when we pd.concat, the data types match
         # the main 'df', preventing a FutureWarning and data corruption.
         new_df = new_df.astype(COLUMN_DTYPES)
-        # --- End of modification ---
         
         # Add the new card row to the main DataFrame
         df = pd.concat([df, new_df], ignore_index=True)
@@ -534,11 +525,10 @@ def show_edit_form():
     # Get the row (as a Series) for the card we are editing
     card_data = all_cards_df.loc[card_index]
 
-    # --- MODIFICATION: Reset image preview when page loads ---
+    # Reset image preview when page loads
     if 'edit_form_loaded' not in st.session_state:
         st.session_state.uploaded_image_preview = None
         st.session_state.edit_form_loaded = True
-    # --- End of modification ---
     
     # Pre-fill expiry month/year from the saved "MM/YY" string
     try:
@@ -549,7 +539,7 @@ def show_edit_form():
     st.subheader(f"Editing: {card_data['Bank']} {card_data['Card Name']}", anchor=False)
     st.caption("Note: You cannot change the manual sort order here.")
     
-    # --- MODIFICATION: File uploader and preview OUTSIDE form ---
+    # File uploader and preview OUTSIDE form
     # Same pattern as the "Add Card" page for live image preview
     uploaded_file = st.file_uploader(
         "Change Card Image (Optional)", 
@@ -569,7 +559,6 @@ def show_edit_form():
         if not os.path.exists(current_image_path): 
             current_image_path = os.path.join(IMAGE_DIR, DEFAULT_IMAGE)
         st.image(current_image_path)
-    # --- End of modification ---
 
     # --- The Edit Form ---
     # All inputs are pre-filled with the card's existing data
@@ -728,8 +717,6 @@ def show_dashboard(all_cards_df, show_cancelled):
                                include cancelled cards in the list.
     """
     
-    # --- Sidebar logic has been MOVED to main() ---
-
     # --- Main Page ---
     st.title("💳 Credit Card Dashboard", anchor=False)
 
@@ -843,7 +830,6 @@ def show_dashboard(all_cards_df, show_cancelled):
                             max_value=float(min_spend * 1.5), # Set a reasonable max
                             value=float(current_spend),
                             step=50.0,
-
                             label_visibility="collapsed"
                         )
                     with f_col2:
@@ -870,7 +856,7 @@ def show_dashboard(all_cards_df, show_cancelled):
     if cards_due_this_month.empty: 
         st.info("No annual fees due this month.")
     else:
-        # --- MODIFICATION: Updated Annual Fee logic ---
+        # Loop over cards due this month
         for index, card_data in cards_due_this_month.iterrows():
             card_name_full = f"{card_data['Bank']} {card_data['Card Name']}"
             fee = card_data['Annual Fee']
@@ -881,19 +867,15 @@ def show_dashboard(all_cards_df, show_cancelled):
                 # If YES, show a green success message with the specific action
                 action_taken = card_data.get("LastFeeAction")
                 
-                # --- MODIFICATION: Check for empty string and set default ---
-                # This block handles data saved by the old, buggy code.
+                # This block handles data saved by older code.
                 # If LastFeeAction is blank, we guess based on counts.
                 if not action_taken:
                     if card_data.get("FeeWaivedCount", 0) > card_data.get("FeePaidCount", 0):
                            action_taken = "Waived"
                     else:
                            action_taken = "Paid" # Default to paid 
-                # --- End of modification ---
                 
-                # --- MODIFICATION: Updated success message text ---
                 st.success(f"✅ *{action_taken} Annual Fee for {card_name_full} for {current_year}.*")
-                # --- End of modification ---
             
             else:
                 # If NO, show the red error message and the action buttons
@@ -906,9 +888,7 @@ def show_dashboard(all_cards_df, show_cancelled):
                         # Increment counter and set the action/year flags
                         df.loc[index, "FeeWaivedCount"] = df.loc[index, "FeeWaivedCount"] + 1
                         df.loc[index, "LastFeeActionYear"] = current_year
-                        # --- MODIFICATION: THIS IS THE FIX ---
                         df.loc[index, "LastFeeAction"] = "Waived" 
-                        # --- End of modification ---
                         df.to_csv(DATA_FILE, index=False)
                         st.rerun()
                 with b_col2:
@@ -917,14 +897,11 @@ def show_dashboard(all_cards_df, show_cancelled):
                         # Increment counter and set the action/year flags
                         df.loc[index, "FeePaidCount"] = df.loc[index, "FeePaidCount"] + 1
                         df.loc[index, "LastFeeActionYear"] = current_year
-                        # --- MODIFICATION: THIS IS THE FIX ---
                         df.loc[index, "LastFeeAction"] = "Paid"
-                        # --- End of modification ---
                         df.to_csv(DATA_FILE, index=False)
                         st.rerun()
             
             st.write("") 
-        # --- End of modification ---
 
     st.subheader(f"Due Next Month ({next_month_name})", anchor=False)
     if cards_due_next_month.empty: 
@@ -1371,8 +1348,8 @@ def show_details_page():
             progress_pct = min(1.0, current_spend / min_spend)
             st.progress(progress_pct, text=f"${current_spend:,.0f} / ${min_spend:,.0f} spent")
 
-    # --- NEW: Annual Fee History ---
-    # This section was added to show the new fee tracking data
+    # --- Annual Fee History ---
+    # This section shows the fee tracking data
     st.divider()
     st.subheader("Annual Fee History", anchor=False)
     
@@ -1381,7 +1358,6 @@ def show_details_page():
         st.metric("Total Times Waived", card.get("FeeWaivedCount", 0))
     with af_col2:
         st.metric("Total Times Paid", card.get("FeePaidCount", 0))
-    # --- End of new section ---
 
     # --- Card Dates ---
     st.divider()
@@ -1513,9 +1489,24 @@ def main():
         margin-top: 10px;
     }
     
-    /* This was for a tag-button experiment, can be removed if not used
-    button[title^="Click to delete tag:"] { ... }
-    */
+    /* CSS FOR TAG BUTTONS (on Manage Tags page) */
+    button[title^="Click to delete tag:"] {
+        background-color: #31333F;
+        color: #FAFAFA;
+        border: 1px solid #555555;
+        border-radius: 20px;
+        padding: 4px 12px;
+        margin: 0;
+        transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+    button[title^="Click to delete tag:"]:hover {
+        background-color: #44444A;
+        border-color: #777777;
+    }
+    button[title^a="Click to delete tag:"]:active {
+        background-color: #2A2B32;
+        border-color: #555555;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1525,7 +1516,7 @@ def main():
     all_cards_df = load_data()
     card_mapping = get_card_mapping()
     
-    # --- MODIFICATION: Persistent Sidebar ---
+    # --- Persistent Sidebar ---
     # This sidebar code is now in main(), so it appears on *all pages*
     # (Dashboard, Add, Edit, etc.), not just the dashboard.
     st.sidebar.selectbox("Select Date Display Format", options=DATE_FORMATS, key="date_format")
@@ -1553,7 +1544,6 @@ def main():
         )
     except Exception as e:
         st.sidebar.error(f"Error exporting data: {e}")
-    # --- End of modification ---
 
 
     # --- Page Routing Logic ---
@@ -1591,7 +1581,6 @@ def main():
     else:
         # --- Default Page ---
         # If no other page flag is set, show the main dashboard.
-        # MODIFICATION: We now pass 'show_cancelled' as an argument
         show_dashboard(all_cards_df, show_cancelled)
 
 # Standard Python entry point
