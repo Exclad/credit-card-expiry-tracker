@@ -207,6 +207,10 @@ def load_data():
     df["LastFeeActionYear"] = pd.to_numeric(df["LastFeeActionYear"], errors='coerce').fillna(0).astype(int)
     df["LastFeeAction"] = df["LastFeeAction"].fillna("").astype(str)
 
+    # This ensures all columns match the master dtype list,
+    # catching any dtypes missed by manual coercion (like 'Annual Fee')
+    # and correctly typing the empty DataFrame on first load.
+    df = df.astype(COLUMN_DTYPES)
     return df
 
 
@@ -842,6 +846,13 @@ def show_dashboard(all_cards_df, show_cancelled):
                     if updated:
                         # On submit, load data, update the one value, save, and rerun
                         df = load_data()
+                        # Get the current status from the card data we looped over
+                        current_status = card['Bonus Status']
+                        # If status is "Not Started" and we just added spend,
+                        # automatically change it to "In Progress".
+                        if current_status == "Not Started" and new_spend > 0:
+                            df.loc[index, "Bonus Status"] = "In Progress"
+                        # Update the spend (this was the original code)
                         df.loc[index, "Current Spend"] = new_spend
                         df.to_csv(DATA_FILE, index=False)
                         st.toast(f"Updated spend for {card_name_full}!")
