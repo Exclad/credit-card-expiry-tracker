@@ -1503,7 +1503,7 @@ def main():
         background-color: #44444A;
         border-color: #777777;
     }
-    button[title^a="Click to delete tag:"]:active {
+    button[title^="Click to delete tag:"]:active {
         background-color: #2A2B32;
         border-color: #555555;
     }
@@ -1518,15 +1518,37 @@ def main():
     
     # --- Persistent Sidebar ---
     # This sidebar code is now in main(), so it appears on *all pages*
-    # (Dashboard, Add, Edit, etc.), not just the dashboard.
+
+    # --- Home Button ---
+    if st.sidebar.button("🏠 Home", use_container_width=True):
+        # Reset all page flags to return to the dashboard
+        st.session_state.show_add_form = False
+        st.session_state.show_edit_form = False
+        st.session_state.show_sort_form = False
+        st.session_state.show_details_page = False
+        st.session_state.show_tag_manager = False
+        
+        # Reset any "context" flags
+        st.session_state.card_to_edit = None
+        st.session_state.card_to_view = None
+        st.session_state.card_to_delete = None
+        
+        # Reset any form-specific states for a clean return
+        st.session_state.duplicate_sort_numbers = []
+        st.session_state.uploaded_image_preview = None
+        st.session_state.image_uploader_key = str(datetime.now().timestamp())
+        
+        # Rerun to refresh the page to the dashboard
+        st.rerun()
+    
     st.sidebar.selectbox("Select Date Display Format", options=DATE_FORMATS, key="date_format")
     
     # Sidebar buttons that act as navigation
-    if st.sidebar.button("Add New Card"):
+    if st.sidebar.button("Add New Card", use_container_width=True):
         st.session_state.show_add_form = True
         st.session_state.add_form_loaded = False # Reset add form preview
         st.rerun()
-    if st.sidebar.button("Manage Tags"):
+    if st.sidebar.button("Manage Tags", use_container_width=True):
         st.session_state.show_tag_manager = True; st.rerun()
         
     st.sidebar.divider()
