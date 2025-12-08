@@ -8,3 +8,6 @@ __pycache__/
 
 # Streamlit config (good practice)
 .streamlit/
+
+# env file
+.env
