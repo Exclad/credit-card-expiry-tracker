@@ -1,13 +1,13 @@
 import logging
 import pandas as pd
 import os
-import shutil 
+import shutil
 from datetime import datetime, time
-from functools import wraps # <--- For the Security Decorator
+from functools import wraps
 from dotenv import load_dotenv
-from filelock import FileLock 
+from filelock import FileLock
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (ApplicationBuilder, ContextTypes, CommandHandler, 
+from telegram.ext import (ApplicationBuilder, ContextTypes, CommandHandler,
                           CallbackQueryHandler, MessageHandler, filters)
 
 # --- Configuration & Setup ---
@@ -16,7 +16,7 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 YOUR_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 DATA_FILE = os.getenv("DATA_FILE", "my_cards.csv")
-LOCK_FILE = f"{DATA_FILE}.lock" 
+LOCK_FILE = f"{DATA_FILE}.lock"
 IMAGE_DIR = "card_images"
 BACKUP_DIR = "backups"
 
@@ -35,7 +35,7 @@ COLUMN_DTYPES = {
     "Sort Order": "int",
     "Notes": "object", "Cancellation Date": "datetime64[ns]", "Re-apply Date": "datetime64[ns]",
     "Tags": "object",
-    "Bonus Offer": "object", "Min Spend": "float", 
+    "Bonus Offer": "object", "Min Spend": "float",
     "Min Spend Deadline": "datetime64[ns]", "Bonus Status": "object",
     "Last 4 Digits": "object", "Current Spend": "float",
     "FeeWaivedCount": "int", "FeePaidCount": "int",
@@ -48,10 +48,9 @@ def restricted(func):
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
-        # Convert both to strings to ensure safe comparison
         if str(user_id) != str(YOUR_CHAT_ID):
             print(f"⛔ Unauthorized access attempt from User ID: {user_id}")
-            return # Ignore them completely
+            return
         return await func(update, context, *args, **kwargs)
     return wrapped
 
@@ -60,8 +59,8 @@ def restricted(func):
 def load_data():
     """Reads the CSV file with thread safety (FileLock)."""
     if not os.path.exists(DATA_FILE):
-        return pd.DataFrame() 
-    
+        return pd.DataFrame()
+
     with FileLock(LOCK_FILE):
         df = pd.read_csv(DATA_FILE)
         df = df.astype(COLUMN_DTYPES)
@@ -75,7 +74,7 @@ def save_data(df):
 def get_card_list_message(df, mode="text", width=32):
     """Generates the string for the card list based on the selected mode."""
     active_cards = df[pd.isna(df['Cancellation Date'])].sort_values(by="Sort Order")
-    
+
     if active_cards.empty:
         return "No active cards found."
 
@@ -85,17 +84,17 @@ def get_card_list_message(df, mode="text", width=32):
             fee = f"${row['Annual Fee']:.2f}"
             if row['Annual Fee'] == 0:
                 fee = "Free"
-            
+
             message += f"💳 *{row['Bank']} {row['Card Name']}*\n"
-            message += f"   💰 {fee}   🗓️ {row['Month of Annual Fee']}\n\n"
+            message += f"   💰 {fee}    🗓️ {row['Month of Annual Fee']}\n\n"
         return message
 
     else:
         # Table Logic
-        fee_col_w = 9 
+        fee_col_w = 9
         due_col_w = 3
-        name_col_w = max(10, width - fee_col_w - due_col_w - 1) 
-        
+        name_col_w = max(10, width - fee_col_w - due_col_w - 1)
+
         message = "📂 *Your Active Cards*\n```\n"
         header = f"{'Card':<{name_col_w}} {'Fee':>{fee_col_w}} {'Due':>{due_col_w}}"
         message += header + "\n"
@@ -108,8 +107,8 @@ def get_card_list_message(df, mode="text", width=32):
             else:
                 display_name = full_name
 
-            fee = f"{row['Annual Fee']:.2f}" 
-            month = row['Month of Annual Fee'][:3] 
+            fee = f"{row['Annual Fee']:.2f}"
+            month = row['Month of Annual Fee'][:3]
 
             # Add dots to lead the eye
             row_str = f"{display_name:.<{name_col_w}} {fee:>{fee_col_w}} {month:>{due_col_w}}"
@@ -132,13 +131,13 @@ def create_backup_file():
     try:
         with FileLock(LOCK_FILE):
             shutil.copy(DATA_FILE, backup_path)
-        
+
         # Cleanup old backups (Keep 5 newest)
         files = [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.startswith("cards_backup_") and f.endswith(".csv")]
         files.sort(key=os.path.getmtime)
         while len(files) > 5:
             os.remove(files.pop(0))
-            
+
         return filename
     except Exception as e:
         print(f"Backup Error: {e}")
@@ -158,7 +157,7 @@ async def backup_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         files = [f for f in os.listdir(BACKUP_DIR) if f.startswith("cards_backup_") and f.endswith(".csv")]
         files.sort(reverse=True) # Newest first
-        
+
         if not files:
             message = "No backups found yet."
         else:
@@ -180,7 +179,7 @@ async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
-    
+
     try:
         with FileLock(LOCK_FILE):
             await context.bot.send_document(
@@ -216,9 +215,9 @@ async def list_cards(update: Update, context: ContextTypes.DEFAULT_TYPE):
     df = load_data()
     current_mode = context.user_data.get('view_mode', 'text')
     current_width = context.user_data.get('table_width', 32)
-    
+
     message_text = get_card_list_message(df, mode=current_mode, width=current_width)
-    
+
     keyboard = []
     if current_mode == 'text':
         keyboard.append([InlineKeyboardButton("📊 Switch to Table View", callback_data="set_view_table")])
@@ -229,9 +228,9 @@ async def list_cards(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="home")])
 
     await context.bot.send_message(
-        chat_id=update.effective_chat.id, 
-        text=message_text, 
-        reply_markup=InlineKeyboardMarkup(keyboard), 
+        chat_id=update.effective_chat.id,
+        text=message_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
 
@@ -240,17 +239,17 @@ async def check_fees(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Checks for annual fees due."""
     df = load_data()
     df = df[pd.isna(df['Cancellation Date'])]
-    
+
     today = datetime.now()
     current_month_idx = today.month - 1
     next_month_idx = (current_month_idx + 1) % 12
     current_year = today.year
-    
+
     current_month_name = MONTH_NAMES[current_month_idx]
     next_month_name = MONTH_NAMES[next_month_idx]
-    
+
     message = f"📅 *Fee Status Report*\n\n"
-    
+
     this_month_cards = df[df["Month of Annual Fee"] == current_month_name]
     message += f"*Due This Month ({current_month_name}):*\n"
     if this_month_cards.empty:
@@ -269,7 +268,7 @@ async def check_fees(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         for idx, row in next_month_cards.iterrows():
             message += f"- {row['Bank']} {row['Card Name']}: ${row['Annual Fee']:.2f}\n"
-            
+
     keyboard = [[InlineKeyboardButton("🏠 Home", callback_data="home")]]
     await context.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -278,7 +277,7 @@ async def check_bonuses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lists active bonuses."""
     df = load_data()
     bonus_cards = df[
-        (pd.isna(df['Cancellation Date'])) & 
+        (pd.isna(df['Cancellation Date'])) &
         (df['Bonus Status'].isin(['In Progress', 'Not Started'])) &
         (pd.notna(df['Min Spend Deadline']))
     ]
@@ -295,7 +294,7 @@ async def check_bonuses(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = row['Current Spend']
         remaining = max(0, min_spend - current)
         deadline = row['Min Spend Deadline'].strftime('%d %b %Y')
-        
+
         message += f"🏆 *{row['Bank']} {row['Card Name']}*\n"
         message += f"   Left: ${remaining:,.2f} (of ${min_spend:,.2f})\n"
         message += f"   Deadline: {deadline}\n\n"
@@ -307,12 +306,12 @@ async def portfolio_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Command: /stats - Calculates summary statistics."""
     df = load_data()
     active_cards = df[pd.isna(df['Cancellation Date'])]
-    
+
     total_cards = len(active_cards)
     total_fees = active_cards['Annual Fee'].sum()
     total_waived = df['FeeWaivedCount'].sum()
     total_paid = df['FeePaidCount'].sum()
-    
+
     message = "📊 *Portfolio Stats*\n\n"
     message += f"💳 *Total Active Cards:* {total_cards}\n"
     message += f"💰 *Total Annual Liability:* ${total_fees:,.2f}\n\n"
@@ -328,7 +327,7 @@ async def track_spend_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Command: /track - Shows buttons for cards with active bonuses."""
     df = load_data()
     bonus_cards = df[
-        (pd.isna(df['Cancellation Date'])) & 
+        (pd.isna(df['Cancellation Date'])) &
         (df['Bonus Status'].isin(['In Progress', 'Not Started'])) &
         (pd.notna(df['Min Spend Deadline']))
     ]
@@ -341,7 +340,7 @@ async def track_spend_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, row in bonus_cards.iterrows():
         button_text = f"{row['Bank']} {row['Card Name']}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"track_select_{idx}")])
-    
+
     keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="home")])
 
     await context.bot.send_message(
@@ -365,15 +364,15 @@ async def card_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row_buttons = []
     for idx, row in active_cards.iterrows():
         button_text = f"{row['Bank']} {row['Card Name']}"
-        if len(button_text) > 20: 
+        if len(button_text) > 20:
             button_text = button_text[:18] + ".."
-            
+
         row_buttons.append(InlineKeyboardButton(button_text, callback_data=f"info_select_{idx}"))
-        
+
         if len(row_buttons) == 2:
             keyboard.append(row_buttons)
             row_buttons = []
-    
+
     if row_buttons:
         keyboard.append(row_buttons)
 
@@ -390,17 +389,17 @@ async def send_weekly_notifications(context: ContextTypes.DEFAULT_TYPE):
     """Scheduled job: Checks for Unpaid Fees AND Expiring Bonuses."""
     df = load_data()
     active_cards = df[pd.isna(df['Cancellation Date'])]
-    
+
     today = datetime.now()
     current_month_name = MONTH_NAMES[today.month - 1]
     current_year = today.year
-    
+
     # 1. FEE CHECKS
     due_cards = active_cards[
-        (active_cards["Month of Annual Fee"] == current_month_name) & 
+        (active_cards["Month of Annual Fee"] == current_month_name) &
         (active_cards["LastFeeActionYear"] != current_year)
     ]
-    
+
     if not due_cards.empty:
         await context.bot.send_message(chat_id=YOUR_CHAT_ID, text=f"🔔 *Weekly Fee Reminder ({current_month_name})*", parse_mode='Markdown')
         for idx, row in due_cards.iterrows():
@@ -418,19 +417,19 @@ async def send_weekly_notifications(context: ContextTypes.DEFAULT_TYPE):
         (active_cards['Bonus Status'].isin(['In Progress', 'Not Started'])) &
         (pd.notna(active_cards['Min Spend Deadline']))
     ].copy()
-    
+
     if not bonus_cards.empty:
         for idx, row in bonus_cards.iterrows():
             deadline = pd.to_datetime(row['Min Spend Deadline'])
             days_left = (deadline - today).days
-            
+
             # Warn if deadline is within 30 days
             if 0 <= days_left <= 30:
                 card_name = f"{row['Bank']} {row['Card Name']}"
                 min_spend = row['Min Spend']
                 current = row['Current Spend']
                 remaining = max(0, min_spend - current)
-                
+
                 urgency = "⚠️" if days_left > 7 else "🚨🚨 URGENT:"
                 msg = (
                     f"{urgency} *Bonus Deadline Approaching!*\n"
@@ -446,7 +445,7 @@ async def send_weekly_notifications(context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles all button interactions."""
     query = update.callback_query
-    await query.answer() 
+    await query.answer()
     data = query.data
 
     # --- HOME ---
@@ -491,7 +490,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card_index = int(data.split("_")[2])
         df = load_data()
         card = df.loc[card_index]
-        
+
         image_filename = card.get("Image Filename", "default.png")
         image_path = os.path.join(IMAGE_DIR, str(image_filename))
         if not os.path.exists(image_path): image_path = os.path.join(IMAGE_DIR, "default.png")
@@ -502,7 +501,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info_msg += f"📅 *Applied:* {pd.to_datetime(card['Date Applied']).strftime('%d %b %Y') if pd.notna(card['Date Applied']) else 'N/A'}\n"
         info_msg += f"📅 *Expiry:* {card['Card Expiry (MM/YY)']}\n"
         info_msg += f"💰 *Annual Fee:* ${card['Annual Fee']:.2f} ({card['Month of Annual Fee']})\n\n"
-        
+
         if card['Notes']: info_msg += f"📝 *Notes:*\n_{card['Notes']}_\n\n"
         if card['Tags']: info_msg += f"🏷️ *Tags:* {card['Tags']}"
 
@@ -510,7 +509,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back to List", callback_data="info_menu")],
             [InlineKeyboardButton("🏠 Home", callback_data="home")]
         ]
-        
+
         await query.delete_message()
         if os.path.exists(image_path):
             try:
@@ -553,12 +552,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             df = load_data(); current_year = datetime.now().year
             card_name = f"{df.loc[card_index, 'Bank']} {df.loc[card_index, 'Card Name']}"
-            
+
             if action == "waived":
                 df.loc[card_index, "FeeWaivedCount"] += 1; df.loc[card_index, "LastFeeAction"] = "Waived"; new_text = f"✅ Marked *{card_name}* as *Waived*!"
             elif action == "paid":
                 df.loc[card_index, "FeePaidCount"] += 1; df.loc[card_index, "LastFeeAction"] = "Paid"; new_text = f"💰 Marked *{card_name}* as *Paid*!"
-                
+
             df.loc[card_index, "LastFeeActionYear"] = current_year; save_data(df)
             keyboard = [[InlineKeyboardButton("🏠 Home", callback_data="home")]]
             await query.edit_message_text(text=new_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
@@ -588,10 +587,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_spend = df.loc[card_index, "Current Spend"]
             new_spend = current_spend + amount_added
             df.loc[card_index, "Current Spend"] = new_spend
-            
+
             min_spend = df.loc[card_index, "Min Spend"]; bonus_status = df.loc[card_index, "Bonus Status"]
             msg = f"✅ Added ${amount_added:,.2f}. Total: ${new_spend:,.2f}"
-            
+
             if new_spend >= min_spend and min_spend > 0 and bonus_status != "Met":
                 df.loc[card_index, "Bonus Status"] = "Met"; msg += "\n🎉 **Congratulations! Minimum spend met!**"
             elif min_spend > 0:
@@ -615,9 +614,12 @@ async def refresh_cards_message(query, context):
     await query.edit_message_text(text=new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 if __name__ == '__main__':
+    # 1. CLEAN LOGGING: Basic config + silencing the noisy httpx library
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     application = ApplicationBuilder().token(TOKEN).build()
-    
+
     # Register Commands with @restricted automatically applied via decorator
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('fees', check_fees))
@@ -628,16 +630,26 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('info', card_info_menu))
     application.add_handler(CommandHandler('backup', backup_menu))
     application.add_handler(CommandHandler('export', export_data))
-    
+
     # Handlers
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    
+
     # Jobs
     job_queue = application.job_queue
-    job_queue.run_repeating(send_weekly_notifications, interval=604800, first=10, chat_id=YOUR_CHAT_ID)
+    
+    # 2. FIXED SUNDAY SCHEDULE
+    # Runs every Sunday at 10:00 AM. 
+    # days=(6,) means Sunday (0=Mon, 1=Tue... 6=Sun)
+    job_queue.run_daily(
+        send_weekly_notifications, 
+        time=time(hour=10, minute=0, second=0), 
+        days=(6,), 
+        chat_id=YOUR_CHAT_ID
+    )
+
+    # Daily backup at 4 AM
     job_queue.run_daily(automated_backup, time=time(hour=4, minute=0, second=0))
-    
-    print("Bot is running...")
+
+    print("Bot is running... (Logs silenced)")
     application.run_polling()
-    
