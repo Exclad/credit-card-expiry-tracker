@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 import os
 import shutil
+import pytz
 from datetime import datetime, time
 from functools import wraps
 from dotenv import load_dotenv
@@ -21,6 +22,9 @@ DATA_FILE = os.getenv("DATA_FILE", "my_cards.csv")
 LOCK_FILE = f"{DATA_FILE}.lock"
 IMAGE_DIR = "card_images"
 BACKUP_DIR = "backups"
+
+# --- Define Singapore Timezone ---
+SGT = pytz.timezone('Asia/Singapore')
 
 if not TOKEN or not YOUR_CHAT_ID:
     raise ValueError("Error: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not found in .env file.")
@@ -664,18 +668,18 @@ if __name__ == '__main__':
     # Jobs
     job_queue = application.job_queue
     
-    # 2. FIXED SUNDAY SCHEDULE
-    # Runs every Sunday at 10:00 AM. 
+    # FIXED SUNDAY SCHEDULE WITH TIMEZONE
+    # Runs every Sunday at 10:00 AM Singapore Time. 
     # days=(6,) means Sunday (0=Mon, 1=Tue... 6=Sun)
     job_queue.run_daily(
         send_weekly_notifications, 
-        time=time(hour=10, minute=0, second=0), 
+        time=time(hour=10, minute=0, second=0, tzinfo=SGT), 
         days=(6,), 
         chat_id=YOUR_CHAT_ID
     )
 
-    # Daily backup at 4 AM
-    job_queue.run_daily(automated_backup, time=time(hour=4, minute=0, second=0))
+    # Daily backup at 4 AM Singapore Time
+    job_queue.run_daily(automated_backup, time=time(hour=4, minute=0, second=0, tzinfo=SGT))
 
     print("Bot is running... (Logs silenced)")
     application.run_polling()
