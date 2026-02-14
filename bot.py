@@ -9,6 +9,8 @@ from filelock import FileLock
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, ContextTypes, CommandHandler,
                           CallbackQueryHandler, MessageHandler, filters)
+from telegram.request import HTTPXRequest 
+from telegram.error import NetworkError, TimedOut
 
 # --- Configuration & Setup ---
 load_dotenv()
@@ -613,12 +615,36 @@ async def refresh_cards_message(query, context):
     keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="home")])
     await query.edit_message_text(text=new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
+# --- Error Handler Function ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    # If it's a network error, just log a warning and return (don't spam tracebacks)
+    if isinstance(context.error, (NetworkError, TimedOut)):
+        logging.warning(f"⚠️ Network glitch detected: {context.error}")
+        return
+
+    # For other errors, log the full traceback
+    logging.error("Exception while handling an update:", exc_info=context.error)
+
 if __name__ == '__main__':
     # 1. CLEAN LOGGING: Basic config + silencing the noisy httpx library
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    application = ApplicationBuilder().token(TOKEN).build()
+    # --- Connection Configuration ---
+    # This tells the bot to be more patient with the internet connection
+    request = HTTPXRequest(
+        connection_pool_size=8,
+        read_timeout=20,   # Wait 20s for data
+        write_timeout=20,  # Wait 20s to send data
+        connect_timeout=20 # Wait 20s to establish connection
+    )
+
+    # Apply the request settings here
+    application = ApplicationBuilder().token(TOKEN).request(request).build()
+
+    # --- Register the Error Handler ---
+    application.add_error_handler(error_handler)
 
     # Register Commands with @restricted automatically applied via decorator
     application.add_handler(CommandHandler('start', start))
